@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- To offer "Share with Soundpack Manager" (docs/PLAN.md §3.9). -->
+    <queries>
+        <intent>
+            <action android:name="org.androidaudioplugin.soundpack.action.SHARE_FOLDER" />
+        </intent>
+    </queries>
+
     <application>
         <!-- Runs the system folder picker and registers the result; shows nothing itself.
              Start it with FolderRegistry.pickFolderIntent(). -->

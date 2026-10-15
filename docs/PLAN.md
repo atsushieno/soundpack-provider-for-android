@@ -677,6 +677,55 @@ Gate:
 - a folder registered both locally and in the hub appears once;
 - uninstalling the hub leaves local folders working.
 
+Status (2026-10-15): **gate passed** on the Galaxy Tab A11+ (Android 16). Built:
+
+- **`app/`, the Soundpack Manager** (`org.androidaudioplugin.soundpack.manager`). It has
+  `Sfz/Sf2/JsfxFolderProvider`: exported, discoverable by action, guarded by the hub-only
+  `…permission.READ_SOUNDPACKS` signature permission, with `grantUriPermissions`. Its
+  screens:
+  - `ConnectActivity`: per-kind consent, naming the caller and saying what it will be able
+    to read (D2);
+  - `ShareFolderActivity`: takes a folder an app shares, after the user confirms kinds;
+  - `MainActivity`: Folders (the host-ui screen, for all kinds), Browse (`SoundpackPicker`
+    over everything installed), and Connected apps (disconnect revokes at once).
+
+  Android does not tell a provider who holds its grants, so the hub keeps its own record of
+  connections.
+- **Client**:
+  - `SoundpackClient.hubAccess()`, which reports `NotInstalled`, `Granted` or
+    `NeedsConsent`;
+  - `connectIntent()`, `takeHubGrant()` and `releaseHubGrant()`;
+  - the `SoundpackConnectActivity` trampoline, which works from a service with the S5
+    caveat;
+  - `Failure.needsConsent`, so the hub's refusal shows as a connect action rather than an
+    error.
+
+  `SoundpackPicker` gained `onConnectHub` and `refreshKey`, because grants do not notify
+  observers.
+- **Host core**: `FolderRegistry.shareWithHubIntent()`, a "Share with Soundpack Manager"
+  button on folder cards, and a check that refuses to run an exported folder provider
+  without a permission and URI grants. Hub constants are in `SoundpackContract.Hub`.
+- **`HubGateTest`** (in `samples/embedded-client`) passes, through the real hub screens
+  and the system picker:
+  - before consent, the hub refuses, and the catalog says "needs consent";
+  - after connecting for SFZ only, SF2 is still refused;
+  - a folder shared with the hub appears once, with the local provider first;
+  - the hub conforms through the grant;
+  - a saved identity falls back to the hub once the local folder is unlinked;
+  - disconnecting in Connected apps ends access at once;
+  - the opt-in test (`-e allowHubUninstall true`): with the hub uninstalled, local folders
+    still list, open and conform.
+
+  The Phase 1 and Phase 2 suites still pass with the hub installed.
+
+Decisions made while building it:
+
+- **The shared folder goes in ClipData.** The share intent carries the tree URI in its
+  ClipData rather than its data, so the hub's intent filter matches without a MIME type.
+  The grant flags cover ClipData, with PREFIX as S6 requires.
+- **The hub's `call()` needs no extra check.** Android already refuses to open the provider
+  for an app without the permission or a grant.
+
 **Phase 4: sfizz migration**, released together with vpo3 and salamander (D4). The
 `sfz-folders` trees carry over.
 

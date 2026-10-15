@@ -11,8 +11,8 @@ Status:
   except that the existing pack apps are not ported yet.
 - **Phase 2** (host core, embedded folder mode): its gate passes, so apps can link their own
   folders.
-
-There is no Soundpack Manager app yet.
+- **Phase 3** (the Soundpack Manager hub): its gate passes. Apps connect per kind, folders
+  can be shared with the hub, and connections can be revoked.
 
 - [docs/PLAN.md](docs/PLAN.md): survey of the existing implementations, the architecture,
   the decisions taken, and the phases with their status.
@@ -29,7 +29,8 @@ There is no Soundpack Manager app yet.
 | `soundpack-host-core` | Linked folders without any UI toolkit: `FolderRegistry`, the folder index, `Local{Sfz,Sf2,Jsfx}FolderProvider`, and a picker activity that links in one step. |
 | `soundpack-host-ui` | Optional Compose folder management: `SoundpackFoldersScreen` / `SoundpackFoldersActivity`. |
 | `soundpack-ui-compose` | `SoundpackPicker`: every readable pack's entries as a tree. |
-| `samples/` | One small pack APK per kind, and `embedded-client`, an app with its own folders. |
+| `app` | The Soundpack Manager (`org.androidaudioplugin.soundpack.manager`): folders shared with every app, behind per-kind consent. |
+| `samples/` | One small pack APK per kind, and `embedded-client`, an app with its own folders that also connects to the hub. |
 | `spikes/` | Phase 0 throwaway APKs. |
 
 ## Build and test
@@ -59,6 +60,24 @@ because creating it takes minutes:
 ```sh
 adb shell rm -rf /sdcard/Music/SoundpackLargeTest
 ```
+
+The hub tests (`HubGateTest`) need the hub installed first. One of them uninstalls the hub,
+so it runs only when asked:
+
+```sh
+./gradlew :app:installDebug
+```
+
+```sh
+./gradlew :samples:embedded-client:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.allowHubUninstall=true
+```
+
+## Reading the Soundpack Manager's folders
+
+The hub's providers are discovered like any pack, but each kind needs the user's consent.
+`SoundpackClient.hubAccess()` tells you whether you have it. When it returns
+`NeedsConsent`, start `connectActivityIntent()`, which asks the hub and keeps the grant.
+`SoundpackPicker` shows a connect button when you pass `onConnectHub`.
 
 ## Letting users link their own folders
 

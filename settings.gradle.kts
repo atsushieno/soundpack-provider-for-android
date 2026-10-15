@@ -23,6 +23,9 @@ include(":soundpack-host-core", ":soundpack-host-ui", ":soundpack-ui-compose")
 include(":samples:sample-sfz-pack", ":samples:sample-sf2-pack", ":samples:sample-jsfx-pack")
 include(":samples:embedded-client")
 
+// The Soundpack Manager (the hub).
+include(":app")
+
 // Phase 0 platform spikes (docs/spikes.md). Throwaway: delete them once the contract is
 // written down.
 include(":spikes:common", ":spikes:client", ":spikes:hub", ":spikes:pack", ":spikes:invisible")

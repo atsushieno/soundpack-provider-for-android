@@ -1,5 +1,6 @@
 package org.androidaudioplugin.soundpack.host
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -176,6 +177,27 @@ class FolderRegistry private constructor(context: Context) {
             kinds?.let { putExtra(EXTRA_KINDS, it.map(SoundpackKind::id).toTypedArray()) }
             initialUri?.let { putExtra(EXTRA_INITIAL_URI, it) }
         }
+
+    /** "Share with Soundpack Manager" (§3.9): hands this folder's grant to the hub, which asks
+     * the user which kinds to share it as. Null when the hub is not installed, or when this app
+     * is the hub. Start it with startActivity; the hub keeps its own grant from then on (S6),
+     * and the folder keeps its pack id, so it appears once in catalogs. */
+    fun shareWithHubIntent(id: String): Intent? {
+        if (context.packageName == SoundpackContract.Hub.PACKAGE)
+            return null
+        val folder = folder(id) ?: return null
+        val intent = Intent(SoundpackContract.Hub.ACTION_SHARE_FOLDER).apply {
+            setPackage(SoundpackContract.Hub.PACKAGE)
+            // In the ClipData rather than the data, so the intent matches the hub's filter
+            // without a MIME type; grants cover ClipData URIs too. PREFIX is needed (S6).
+            clipData = ClipData.newRawUri(folder.displayName, folder.treeUri)
+            putExtra(SoundpackContract.Hub.EXTRA_KINDS, folder.kinds.map { it.id }.toTypedArray())
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+        @Suppress("DEPRECATION")
+        return intent.takeIf { context.packageManager.resolveActivity(it, 0) != null }
+    }
 
     /** Returns true when the folder's content or availability changed. */
     private fun scan(id: String): Boolean = synchronized(scanLock) {

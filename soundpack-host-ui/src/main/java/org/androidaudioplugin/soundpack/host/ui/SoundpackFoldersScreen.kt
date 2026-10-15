@@ -54,6 +54,8 @@ fun SoundpackFoldersScreen(registry: FolderRegistry, modifier: Modifier = Modifi
     var revision by remember { mutableIntStateOf(0) }
     var folders by remember { mutableStateOf(emptyList<FolderRegistry.Folder>()) }
     var counts by remember { mutableStateOf(emptyMap<String, Map<SoundpackKind, Int>>()) }
+    var shareIntents by remember { mutableStateOf(emptyMap<String, android.content.Intent>()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     var busy by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<PendingFolder?>(null) }
@@ -68,6 +70,7 @@ fun SoundpackFoldersScreen(registry: FolderRegistry, modifier: Modifier = Modifi
         }
         folders = list
         counts = entryCounts
+        shareIntents = withContext(Dispatchers.IO) { list.mapNotNull { folder -> registry.shareWithHubIntent(folder.id)?.let { folder.id to it } }.toMap() }
     }
 
     fun work(label: String, block: suspend () -> Unit) {
@@ -117,6 +120,7 @@ fun SoundpackFoldersScreen(registry: FolderRegistry, modifier: Modifier = Modifi
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(folders, key = { it.id }) { folder ->
                     FolderCard(folder, served, counts[folder.id].orEmpty(), enabled = busy == null,
+                        onShare = shareIntents[folder.id]?.let { intent -> { context.startActivity(intent) } },
                         onKinds = { kinds -> work("Rescanning…") { withContext(Dispatchers.IO) { registry.setKinds(folder.id, kinds) } } },
                         onRescan = { work("Rescanning…") { withContext(Dispatchers.IO) { registry.rescan(folder.id) } } },
                         onRemove = { work("Removing…") { withContext(Dispatchers.IO) { registry.remove(folder.id) } } })
@@ -178,6 +182,8 @@ private fun FolderCard(
     onKinds: (Set<SoundpackKind>) -> Unit,
     onRescan: () -> Unit,
     onRemove: () -> Unit,
+    /** "Share with Soundpack Manager"; null when the hub is not installed (§3.9). */
+    onShare: (() -> Unit)? = null,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -205,6 +211,7 @@ private fun FolderCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onRescan, enabled = enabled) { Text("Rescan") }
                 TextButton(onClick = onRemove, enabled = enabled) { Text("Remove") }
+                onShare?.let { TextButton(onClick = it, enabled = enabled && folder.available) { Text("Share with Soundpack Manager") } }
             }
         }
     }

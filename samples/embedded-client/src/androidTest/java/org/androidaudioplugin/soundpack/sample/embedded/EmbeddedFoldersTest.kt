@@ -47,7 +47,7 @@ class EmbeddedFoldersTest {
     @Before
     fun setUp() {
         registry.folders().forEach { registry.remove(it.id) }
-        shell("rm -rf $SMALL")
+        TestSupport.shell("rm -rf $SMALL")
     }
 
     /** The large fixture is kept between runs: creating 20,000 files through shared storage
@@ -56,13 +56,13 @@ class EmbeddedFoldersTest {
     fun tearDown() {
         registry.awaitBackgroundScans()
         registry.folders().forEach { registry.remove(it.id) }
-        shell("rm -rf $SMALL")
+        TestSupport.shell("rm -rf $SMALL")
     }
 
     @Test
     fun linksServesAndListsAFolder() {
-        writeSmallFolder()
-        val result = pickFolder("Music/$SMALL_NAME", kinds = null)
+        TestSupport.writeSmallFolder(SMALL_NAME)
+        val result = TestSupport.pickFolder("Music/$SMALL_NAME")
         assertEquals("picker result: ${result.resultData?.getStringExtra(FolderRegistry.EXTRA_ERROR)}", Activity.RESULT_OK, result.resultCode)
         val folderId = result.resultData!!.getStringExtra(FolderRegistry.EXTRA_FOLDER_ID)!!
         val folder = registry.folder(folderId)!!
@@ -81,7 +81,7 @@ class EmbeddedFoldersTest {
         assertTrue("Piano/samples/a.wav" in files)
         sfz.openFile(pack, "Piano/samples/a.wav").use { afd ->
             assertTrue(OsConstants.S_ISREG(Os.fstat(afd.fileDescriptor).st_mode))
-            assertEquals(SAMPLE_BYTES.toLong(), afd.declaredLength)
+            assertEquals(TestSupport.SAMPLE_BYTES.toLong(), afd.declaredLength)
         }
 
         // The same contract as any other provider.
@@ -98,7 +98,7 @@ class EmbeddedFoldersTest {
         // A live pack: no revision in its identity, so it keeps resolving after the folder changes.
         val identity = sfz.identityOf(sfz.entries(pack).single())
         assertEquals(null, identity.revision)
-        shell("echo extra > $SMALL/Piano/samples/b.txt")
+        TestSupport.shell("echo extra > $SMALL/Piano/samples/b.txt")
         val revision = pack.revision
         registry.rescan(folderId)
         val updated = sfz.catalog().packs.single { it.id == folderId }
@@ -121,12 +121,12 @@ class EmbeddedFoldersTest {
         val perDirectory = 1000
         for (d in 1..directories)
             // This app cannot list shared storage itself (scoped storage); the shell can.
-            if (shell("ls $LARGE/d$d 2>/dev/null | wc -l").trim() != perDirectory.toString())
-                shell("mkdir -p $LARGE/d$d", "seq -f '$LARGE/d$d/f%g.dat' 1 $perDirectory | xargs touch")
-        shell("echo '<region> sample=*sine' > $LARGE/Big.sfz")
+            if (TestSupport.shell("ls $LARGE/d$d 2>/dev/null | wc -l").trim() != perDirectory.toString())
+                TestSupport.shell("mkdir -p $LARGE/d$d", "seq -f '$LARGE/d$d/f%g.dat' 1 $perDirectory | xargs touch")
+        TestSupport.shell("echo '<region> sample=*sine' > $LARGE/Big.sfz")
 
         val started = System.nanoTime()
-        val result = pickFolder("Music/$LARGE_NAME", kinds = setOf(SoundpackKind.SFZ))
+        val result = TestSupport.pickFolder("Music/$LARGE_NAME", kinds = setOf(SoundpackKind.SFZ))
         val linkSeconds = (System.nanoTime() - started) / 1e9
         assertEquals(Activity.RESULT_OK, result.resultCode)
         val folderId = result.resultData!!.getStringExtra(FolderRegistry.EXTRA_FOLDER_ID)!!
@@ -149,47 +149,11 @@ class EmbeddedFoldersTest {
             .format(linkSeconds, openMillis))
     }
 
-    private fun writeSmallFolder() {
-        // Staged in this app's external files directory, which the shell can read, then copied
-        // to shared storage as a user would (adb push, a file manager).
-        val stage = File(context.getExternalFilesDir(null), "stage").apply { deleteRecursively(); mkdirs() }
-        File(stage, "Piano/samples").mkdirs()
-        File(stage, "Piano/piano.sfz").writeText("<control> default_path=samples/\n<region> sample=a.wav\n")
-        File(stage, "Piano/samples/a.wav").writeBytes(Random(1).nextBytes(SAMPLE_BYTES))
-        File(stage, "Piano/._piano.sfz").writeText("AppleDouble")
-        File(stage, ".DS_Store").writeText("hidden")
-        File(stage, "README").writeText("not an instrument")
-        listOf("Sines.sf2", "Drums/Clicks.sf2").forEach { name ->
-            File(stage, "Kits/$name").apply { parentFile!!.mkdirs() }.outputStream().use { out ->
-                instrumentation.context.assets.open(name).use { it.copyTo(out) }
-            }
-        }
-        shell("cp -r ${stage.absolutePath} $SMALL")
-    }
-
-    /** Runs [SoundpackFolderPickerActivity] and answers the system picker as a user would. */
-    private fun pickFolder(path: String, kinds: Set<SoundpackKind>?): android.app.Instrumentation.ActivityResult {
-        val initial = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$path")
-        val scenario = ActivityScenario.launchActivityForResult<SoundpackFolderPickerActivity>(registry.pickFolderIntent(kinds, initial))
-        device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 20_000)!!.click()
-        device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)!!.click()
-        return scenario.result
-    }
-
-    /** UiAutomation runs commands without a shell, so pipes and redirection go through a script
-     * in a place the shell can read. */
-    private fun shell(vararg commands: String): String {
-        val script = File(context.getExternalFilesDir(null), "test.sh").apply { writeText(commands.joinToString("\n") + "\n") }
-        return android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand("sh ${script.absolutePath}"))
-            .use { it.readBytes().decodeToString() }
-    }
-
     private companion object {
         const val LOG_TAG = "EmbeddedFoldersTest"
         const val SMALL_NAME = "SoundpackEmbeddedTest"
         const val LARGE_NAME = "SoundpackLargeTest"
         const val SMALL = "/sdcard/Music/$SMALL_NAME"
         const val LARGE = "/sdcard/Music/$LARGE_NAME"
-        const val SAMPLE_BYTES = 65536
     }
 }

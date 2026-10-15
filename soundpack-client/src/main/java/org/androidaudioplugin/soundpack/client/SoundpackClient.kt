@@ -61,8 +61,22 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
 
     data class FileInfo(val path: String, val size: Long, val lastModified: Long)
 
-    /** A provider that could not be read, e.g. the hub before consent (SecurityException). */
-    data class Failure(val endpoint: Endpoint, val error: Exception)
+    /** A provider that could not be read. */
+    data class Failure(val endpoint: Endpoint, val error: Exception) {
+        /** The hub before the user connected this app for the kind: show a "connect" action
+         * ([hubAccess]), not an error. */
+        val needsConsent: Boolean
+            get() = error is SecurityException && endpoint.packageName == SoundpackContract.Hub.PACKAGE
+    }
+
+    /** Whether this app may read the Soundpack Manager's folders of [kind]. */
+    sealed interface HubAccess {
+        data object NotInstalled : HubAccess
+        data object Granted : HubAccess
+        /** Start [intent] for a result and pass it to [takeHubGrant], or start
+         * [connectActivityIntent] (which does both, and works from a service). */
+        data class NeedsConsent(val intent: Intent) : HubAccess
+    }
 
     /** [packs] has one pack per id: the local provider wins, then discovery order. */
     data class Catalog(val endpoints: List<Endpoint>, val packs: List<Pack>, val failures: List<Failure>)
@@ -221,6 +235,43 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
         val normalized = PackPath.normalize(path) ?: throw FileNotFoundException("Invalid path: $path")
         return resolver.openAssetFileDescriptor(uri(pack.endpoint.authority, SoundpackContract.fileSegments(pack.id, pack.revision, normalized)), "r")
             ?: throw FileNotFoundException(path)
+    }
+
+    /** The hub's endpoint for this kind, if the hub is installed and visible. */
+    fun hubEndpoint(): Endpoint? = endpoints().firstOrNull { it.packageName == SoundpackContract.Hub.PACKAGE }
+
+    fun hubAccess(): HubAccess {
+        val hub = hubEndpoint() ?: return HubAccess.NotInstalled
+        val root = Uri.parse(SoundpackContract.Hub.rootUriString(hub.authority))
+        val granted = resolver.persistedUriPermissions.any { it.uri == root && it.isReadPermission }
+        return if (granted) HubAccess.Granted else HubAccess.NeedsConsent(connectIntent())
+    }
+
+    /** The hub's consent screen for this kind. Start it for a result. */
+    fun connectIntent(): Intent = Intent(SoundpackContract.Hub.ACTION_CONNECT)
+        .setPackage(SoundpackContract.Hub.PACKAGE)
+        .putExtra(SoundpackContract.Hub.EXTRA_KIND, kind.id)
+
+    /** [SoundpackConnectActivity]: asks the hub and keeps the grant. From a service (a plugin
+     * UI), add FLAG_ACTIVITY_NEW_TASK; on Android 14+ the host must have bound that service
+     * with BIND_ALLOW_ACTIVITY_STARTS (docs/spikes.md, S5). */
+    fun connectActivityIntent(): Intent = Intent(context, SoundpackConnectActivity::class.java)
+        .putExtra(SoundpackContract.Hub.EXTRA_KIND, kind.id)
+
+    /** Persists the grant from the hub's consent screen. Returns whether access was granted. */
+    fun takeHubGrant(resultCode: Int, data: Intent?): Boolean {
+        val uri = data?.data ?: return false
+        val hub = hubEndpoint() ?: return false
+        if (resultCode != android.app.Activity.RESULT_OK || uri.toString() != SoundpackContract.Hub.rootUriString(hub.authority))
+            return false
+        resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return true
+    }
+
+    /** Gives the hub grant back, e.g. when the user disconnects in this app. */
+    fun releaseHubGrant() {
+        val hub = hubEndpoint() ?: return
+        runCatching { resolver.releasePersistableUriPermission(Uri.parse(SoundpackContract.Hub.rootUriString(hub.authority)), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
     }
 
     /** Mirrors [pack] into [destination] for engines that need real paths (JSFX); see

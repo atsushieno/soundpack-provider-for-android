@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,13 +36,18 @@ fun SoundpackPicker(
     selected: SoundpackIdentity?,
     onSelect: (SoundpackClient.Entry) -> Unit,
     modifier: Modifier = Modifier,
+    /** Shown as a button when the Soundpack Manager is installed but this app is not connected
+     * for the kind; start [SoundpackClient.connectActivityIntent] from it. */
+    onConnectHub: (() -> Unit)? = null,
+    /** Change it to reload, e.g. after connecting: grants do not notify observers. */
+    refreshKey: Any? = null,
 ) {
     var packs by remember(client) { mutableStateOf<List<PackEntries>?>(null) }
     var failures by remember(client) { mutableStateOf(emptyList<SoundpackClient.Failure>()) }
     var expanded by remember(client) { mutableStateOf<Set<String>?>(null) }
     var seen by remember(client) { mutableStateOf(emptySet<String>()) }
 
-    LaunchedEffect(client) {
+    LaunchedEffect(client, refreshKey) {
         client.catalogFlow()
             .map { catalog -> catalog to catalog.packs.map { pack -> PackEntries(pack, runCatching { client.entries(pack) }.getOrDefault(emptyList())) } }
             .flowOn(Dispatchers.IO)
@@ -61,7 +67,11 @@ fun SoundpackPicker(
             packs == null -> Text("Looking for ${client.kind.id.uppercase()} content…", Modifier.padding(12.dp))
             rows.isEmpty() -> Text("No ${client.kind.id.uppercase()} content found. Install a pack, or link a folder.", Modifier.padding(12.dp))
         }
-        failures.forEach { Text("${it.endpoint.authority}: ${it.error.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        if (onConnectHub != null && failures.any { it.needsConsent })
+            OutlinedButton(onClick = onConnectHub, modifier = Modifier.padding(8.dp)) { Text("Connect Soundpack Manager") }
+        failures.filter { !it.needsConsent }.forEach {
+            Text("${it.endpoint.authority}: ${it.error.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
         LazyColumn {
             items(rows, key = { it.key }) { row ->
                 val entry = (row.node as? Node.Leaf)?.entry

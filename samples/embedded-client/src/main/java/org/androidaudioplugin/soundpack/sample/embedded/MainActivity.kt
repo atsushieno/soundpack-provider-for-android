@@ -58,6 +58,9 @@ private fun SampleScreen() {
     var selected by remember(kind) { mutableStateOf<SoundpackClient.Entry?>(null) }
     var detail by remember { mutableStateOf("") }
     var linkResult by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableStateOf(0) }
+    // Connecting to the Soundpack Manager: the grant does not notify observers, so reload.
+    val connect = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh++ }
 
     // The UI-free path: SoundpackFolderPickerActivity picks and links in one go.
     val link = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -81,7 +84,8 @@ private fun SampleScreen() {
             OutlinedButton(onClick = { link.launch(registry.pickFolderIntent()) }) { Text("Link folder (UI-free)") }
         }
         linkResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        SoundpackPicker(client, selected?.let { client.identityOf(it) }, onSelect = { selected = it }, Modifier.weight(1f).fillMaxWidth())
+        SoundpackPicker(client, selected?.let { client.identityOf(it) }, onSelect = { selected = it }, Modifier.weight(1f).fillMaxWidth(),
+            onConnectHub = { connect.launch(client.connectActivityIntent()) }, refreshKey = refresh)
         selected?.let { entry ->
             LaunchedEffect(entry) { detail = withContext(Dispatchers.IO) { describe(client, entry) } }
             Text(client.identityOf(entry).format(), style = MaterialTheme.typography.bodySmall)

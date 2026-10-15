@@ -12,5 +12,16 @@
         <intent>
             <action android:name="org.androidaudioplugin.soundpack.jsfx.V1" />
         </intent>
+        <!-- The Soundpack Manager's consent screen (docs/PLAN.md §3.6). -->
+        <intent>
+            <action android:name="org.androidaudioplugin.soundpack.action.CONNECT" />
+        </intent>
     </queries>
+
+    <application>
+        <activity
+            android:name="org.androidaudioplugin.soundpack.client.SoundpackConnectActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    </application>
 </manifest>

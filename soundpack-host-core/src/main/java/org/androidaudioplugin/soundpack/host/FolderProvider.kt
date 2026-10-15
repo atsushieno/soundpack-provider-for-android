@@ -30,6 +30,11 @@ abstract class FolderProvider(kind: SoundpackKind) : SoundpackProvider(kind) {
     override fun attachInfo(context: Context, info: ProviderInfo) {
         val local = info.authority.split(';').any { it.endsWith(".soundpack.local.${kind.id}") }
         check(!(local && info.exported)) { "${javaClass.name} serves this app's private folders: it must not be exported" }
+        // The user's folders are never public: an exported folder provider (the hub's) is
+        // read only through grants, so it must be guarded by a permission and grant URIs.
+        check(!info.exported || (info.readPermission != null && info.grantUriPermissions)) {
+            "${javaClass.name} is exported, so it needs android:permission and android:grantUriPermissions=\"true\""
+        }
         super.attachInfo(context, info)
     }
 
@@ -120,6 +125,14 @@ abstract class FolderProvider(kind: SoundpackKind) : SoundpackProvider(kind) {
         const val MAX_STREAM_COPY = 8L shl 30
     }
 }
+
+/** The Soundpack Manager's providers: `${applicationId}.soundpack.<kind>`, exported with the
+ * kind's discovery action, guarded by a permission, and read through consent grants (§3.6). */
+class SfzFolderProvider : FolderProvider(SoundpackKind.SFZ)
+
+class Sf2FolderProvider : FolderProvider(SoundpackKind.SF2)
+
+class JsfxFolderProvider : FolderProvider(SoundpackKind.JSFX)
 
 /** Declare with `android:authorities="${applicationId}.soundpack.local.sfz"` and
  * `android:exported="false"`. */

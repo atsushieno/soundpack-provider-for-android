@@ -120,7 +120,8 @@ class SamplePacksTest {
         val catalog = withTimeout(10_000) {
             SoundpackClient(context, SoundpackKind.SF2).catalogFlow().first { catalog -> catalog.packs.any { it.id == SF2_PACK } }
         }
-        assertTrue(catalog.failures.isEmpty())
+        // An installed hub this test app is not connected to is "needs consent", not an error.
+        assertTrue(catalog.failures.toString(), catalog.failures.all { it.needsConsent })
     }
 
     private companion object {
