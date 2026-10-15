@@ -7,6 +7,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.Until
 import org.androidaudioplugin.soundpack.SoundpackContract
 import org.androidaudioplugin.soundpack.SoundpackKind
@@ -108,8 +109,10 @@ class HubGateTest {
         TestSupport.waitFor(description = "the grant to be revoked") { (sfz.hubAccess() is SoundpackClient.HubAccess.NeedsConsent).takeIf { it } }
         assertRefused(hubSfz)
 
-        // Leave the hub as it was: remove the shared folder there.
+        // Leave the hub as it was: remove the shared folder there. A hub in real use lists other
+        // folders too, and the list only holds what is on screen, so scroll to the card.
         device.findObject(By.text("Folders")).click()
+        device.wait(Until.findObject(By.scrollable(true)), 10_000)?.scrollUntil(Direction.DOWN, Until.findObject(By.text(NAME)))
         device.wait(Until.findObject(By.hasChild(By.text(NAME))), 10_000)!!.findObject(By.text("Remove")).click()
         device.wait(Until.gone(By.text(NAME)), 10_000)
     }

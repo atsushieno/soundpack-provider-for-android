@@ -73,8 +73,9 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
     sealed interface HubAccess {
         data object NotInstalled : HubAccess
         data object Granted : HubAccess
-        /** Start [intent] for a result and pass it to [takeHubGrant], or start
-         * [connectActivityIntent] (which does both, and works from a service). */
+        /** From one of your own activities, start [intent] for a result and pass it to
+         * [takeHubGrant], or start [connectActivityIntent], which does both. In a UI another
+         * app shows (an AAP plugin UI), offer neither: say where to connect instead. */
         data class NeedsConsent(val intent: Intent) : HubAccess
     }
 
@@ -252,9 +253,9 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
         .setPackage(SoundpackContract.Hub.PACKAGE)
         .putExtra(SoundpackContract.Hub.EXTRA_KIND, kind.id)
 
-    /** [SoundpackConnectActivity]: asks the hub and keeps the grant. From a service (a plugin
-     * UI), add FLAG_ACTIVITY_NEW_TASK; on Android 14+ the host must have bound that service
-     * with BIND_ALLOW_ACTIVITY_STARTS (docs/spikes.md, S5). */
+    /** [SoundpackConnectActivity]: asks the hub and keeps the grant. Start it from one of your own activities in the foreground. Never start it from a UI
+     * that another app is showing (an AAP plugin UI in a host): Android blocks that, and the
+     * design does not ask hosts to lift it (docs/PLAN.md §3.9, "Where setup happens"). */
     fun connectActivityIntent(): Intent = Intent(context, SoundpackConnectActivity::class.java)
         .putExtra(SoundpackContract.Hub.EXTRA_KIND, kind.id)
 

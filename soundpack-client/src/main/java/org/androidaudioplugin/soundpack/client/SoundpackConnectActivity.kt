@@ -7,9 +7,10 @@ import org.androidaudioplugin.soundpack.SoundpackContract
 import org.androidaudioplugin.soundpack.SoundpackKind
 
 /** Asks the Soundpack Manager for access to one kind and keeps the grant, then finishes with
- * RESULT_OK when granted. No UI of its own; it exists so that callers without an activity
- * result (a plugin UI hosted by a service) can connect too (docs/PLAN.md §3.6). Start it with
- * [SoundpackClient.connectActivityIntent]. */
+ * RESULT_OK when granted. No UI of its own; it exists for apps whose UI layer cannot easily
+ * handle activity results (JUCE, SDL). Start it with [SoundpackClient.connectActivityIntent]
+ * from one of the app's own activities, never from a UI another app is showing (docs/PLAN.md
+ * §3.6, §3.9 "Where setup happens"). */
 class SoundpackConnectActivity : Activity() {
     private val client by lazy {
         val kind = intent.getStringExtra(SoundpackContract.Hub.EXTRA_KIND)?.let { SoundpackKind.builtIn(it) }

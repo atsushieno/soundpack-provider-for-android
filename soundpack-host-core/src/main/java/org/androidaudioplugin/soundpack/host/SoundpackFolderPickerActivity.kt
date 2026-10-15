@@ -10,8 +10,9 @@ import org.androidaudioplugin.soundpack.SoundpackKind
 import kotlin.concurrent.thread
 
 /** Runs the system folder picker, then links the chosen folder in [FolderRegistry]. No UI of
- * its own and no Compose, so ImGui, JUCE and service-hosted plugin UIs can use it (§3.9).
- * Start it with [FolderRegistry.pickFolderIntent].
+ * its own and no Compose, so apps whose UI is ImGui or JUCE can use it (§3.9). Start it with
+ * [FolderRegistry.pickFolderIntent] from one of the app's own activities, never from a UI
+ * another app is showing (§3.9, "Where setup happens").
  *
  * Result: RESULT_OK with the tree URI as data, [FolderRegistry.EXTRA_FOLDER_ID] and
  * [FolderRegistry.EXTRA_ENTRY_COUNTS]; or RESULT_CANCELED, with [FolderRegistry.EXTRA_ERROR]

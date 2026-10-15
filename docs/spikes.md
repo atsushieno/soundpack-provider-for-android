@@ -176,9 +176,9 @@ aap-core's `AudioPluginSurfaceControlClient` binds `AudioPluginViewService`
    return a result.
 4. From the TrampolineActivity, tap **Connect to the hub from here**. This is the real
    flow: consent, then a persisted grant and a successful read.
-5. On Android 14+, repeat with **+ BIND_ALLOW_ACTIVITY_STARTS**. If step 2 fails with
-   plain `BIND_AUTO_CREATE` but works with this flag, AAP hosts need to bind with it. That
-   is an aap-core change, not a soundpack one.
+5. On Android 14+, repeat with **+ BIND_ALLOW_ACTIVITY_STARTS**. This only confirms what
+   lifts the block: it is a privilege the host would grant every plugin it binds, and the
+   design does not ask for it (see below).
 
 In Spike Client, **S5: show what the embedded UI recorded** lists what happened.
 
@@ -232,11 +232,14 @@ Fill in one column per device, then update the [spike] markers in `docs/PLAN.md`
   Going through the hub costs about 3–5 ms per open over a direct SAF open. sfizz opens
   samples lazily, so an instrument with N samples spends roughly N × 15 ms opening them.
   That is the "open many" risk in PLAN §8; it is now measured, not guessed.
-- **S5: aap-core must change.** On Android 14+, a plugin UI hosted by
-  `AudioPluginViewService` cannot start any activity unless the host binds with
-  `BIND_ALLOW_ACTIVITY_STARTS`. That covers sfizz's existing `SfzFoldersActivity` as much as
-  the planned `SoundpackFoldersActivity` or the hub's consent screen. The fix is in
-  `AudioPluginSurfaceControlClient.bindPluginViewService()`, not in the soundpack libraries.
+- **S5: embedded plugin UIs must not start activities.** On Android 14+, a plugin UI hosted
+  by `AudioPluginViewService` in another app cannot start any activity. Only the host could
+  lift that, by lending the privilege to every plugin it binds. Instead, the design keeps
+  the activities that need starting out of embedded UIs: the folder picker, the folder
+  screen and the hub's consent screen. They run from the app's own activity, or in the
+  Soundpack Manager, and the embedded UI only browses and selects (PLAN §3.9, "Where setup
+  happens"). sfizz's existing `SfzFoldersActivity` button has the same problem in external
+  hosts and moves to sfizz's own activity in Phase 4.
 - **S6: works when the delegation includes `FLAG_GRANT_PREFIX_URI_PERMISSION`**, so
   "Share with Soundpack Manager" needs no fallback.
 

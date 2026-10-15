@@ -217,8 +217,9 @@ private fun FolderCard(
     }
 }
 
-/** [SoundpackFoldersScreen] as an activity, for apps without Compose screens of their own and
- * for service-hosted plugin UIs (start with FLAG_ACTIVITY_NEW_TASK). */
+/** [SoundpackFoldersScreen] as an activity, for apps without Compose screens of their own.
+ * Start it from one of the app's own activities, never from a UI another app is showing (an
+ * AAP plugin UI in a host): Android blocks that (docs/PLAN.md §3.9, "Where setup happens"). */
 class SoundpackFoldersActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

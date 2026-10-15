@@ -169,9 +169,9 @@ class FolderRegistry private constructor(context: Context) {
     }
 
     /** An intent for [SoundpackFolderPickerActivity]: the system picker, then registration.
-     * Without [kinds], the kinds the folder has entries for are used. Starting it from a
-     * service (a plugin UI) needs FLAG_ACTIVITY_NEW_TASK, and the result is then lost; observe
-     * the registry instead. */
+     * Without [kinds], the kinds the folder has entries for are used. Start it from one of your own activities in the foreground. Never start it from a UI
+     * that another app is showing (an AAP plugin UI in a host): Android blocks that, and the
+     * design does not ask hosts to lift it (docs/PLAN.md §3.9, "Where setup happens"). */
     fun pickFolderIntent(kinds: Set<SoundpackKind>? = null, initialUri: Uri? = null): Intent =
         Intent(context, SoundpackFolderPickerActivity::class.java).apply {
             kinds?.let { putExtra(EXTRA_KINDS, it.map(SoundpackKind::id).toTypedArray()) }

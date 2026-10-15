@@ -61,7 +61,10 @@ because creating it takes minutes:
 adb shell rm -rf /sdcard/Music/SoundpackLargeTest
 ```
 
-The hub tests (`HubGateTest`) need the hub installed first. One of them uninstalls the hub,
+The hub tests (`HubGateTest`) need the hub installed first. They change the hub's state while
+they run: they connect and disconnect the sample app, and share a test folder and remove it
+again. They also read every folder already shared as SFZ there, to run the conformance
+checks. Prefer a device whose hub holds no personal folders. One of them uninstalls the hub,
 so it runs only when asked:
 
 ```sh
@@ -78,6 +81,17 @@ The hub's providers are discovered like any pack, but each kind needs the user's
 `SoundpackClient.hubAccess()` tells you whether you have it. When it returns
 `NeedsConsent`, start `connectActivityIntent()`, which asks the hub and keeps the grant.
 `SoundpackPicker` shows a connect button when you pass `onConnectHub`.
+
+## Where setup happens
+
+Connecting to the hub and linking folders open other screens: the hub's consent screen and
+the system folder picker. Start them only from one of your app's own activities. A UI that
+another app shows cannot start activities on Android 14+, and these libraries do not ask
+hosts to change that. An AAP plugin UI embedded in a host is such a UI.
+
+In those UIs, use `SoundpackPicker` to browse and select only. Leave `onConnectHub` null, and
+pass a `setupHint` such as "Open AAP Sfizz to add folders". Setup is a one-time step that the
+user does in the plugin app itself or in the Soundpack Manager.
 
 ## Letting users link their own folders
 
@@ -97,6 +111,9 @@ of:
 - `FolderRegistry.pickFolderIntent()`, which picks and links in one step without Compose;
 - `SoundpackFoldersActivity`, the Compose folder screen;
 - `FolderRegistry` directly, from your own UI.
+
+The first two start activities, so they are for your app's own activities (see "Where setup
+happens").
 
 ## Publishing a pack
 
