@@ -19,6 +19,8 @@ dependencies {
     api(project(":soundpack-contract"))
     implementation(libs.coroutines.android)
 
+    testImplementation(libs.junit)
+
     // The device tests read the sample packs (samples/) installed on the device.
     androidTestImplementation(project(":soundpack-testkit"))
     androidTestImplementation(libs.androidx.test.runner)

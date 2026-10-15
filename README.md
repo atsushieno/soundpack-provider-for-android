@@ -25,9 +25,9 @@ Status:
 
 | Module | What it is |
 | --- | --- |
-| `soundpack-contract` | Kinds, content URI layout, columns, `commons-soundpack://` identities, path rules, SF2 preset reader. Pure Kotlin. |
+| `soundpack-contract` | Kinds, content URI layout, columns, `commons-soundpack://` identities, path rules, SF2 preset reader, SFZ reference scanner. Pure Kotlin. |
 | `soundpack-provider-sdk` | `SoundpackProvider` base class, and `AssetPackProvider` for packs shipped as APK assets (`SfzAssetPackProvider`, `Sf2AssetPackProvider`, `JsfxAssetPackProvider`). |
-| `soundpack-client` | `SoundpackClient`: discovery, catalog (and a live `Flow`), opening saved identities, `materialize` for path-only engines. |
+| `soundpack-client` | `SoundpackClient`: discovery, catalog (and a live `Flow`), opening saved identities, prefetching an instrument's files (`PackSession.prefetch`), `materialize` for path-only engines. |
 | `soundpack-testkit` | `ProviderConformance`, to check any provider from a device test. |
 | `soundpack-host-core` | Linked folders without any UI toolkit: `FolderRegistry`, the folder index, `Local{Sfz,Sf2,Jsfx}FolderProvider`, and a picker activity that links in one step. |
 | `soundpack-host-ui` | Optional Compose folder management: `SoundpackFoldersScreen` / `SoundpackFoldersActivity`. |

@@ -20,6 +20,7 @@ import org.androidaudioplugin.soundpack.PackPath
 import org.androidaudioplugin.soundpack.SoundpackContract
 import org.androidaudioplugin.soundpack.SoundpackIdentity
 import org.androidaudioplugin.soundpack.SoundpackKind
+import java.io.Closeable
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -269,13 +270,36 @@ class PackSession internal constructor(
     private val client: SoundpackClient,
     val pack: SoundpackClient.Pack,
     val entryPath: String,
-) {
+) : Closeable {
     /** The pack's file index, fetched on first use. */
     val files: List<SoundpackClient.FileInfo> by lazy { client.files(pack) }
 
-    fun openEntry(): AssetFileDescriptor = client.openFile(pack, entryPath)
+    @Volatile
+    private var prefetcher: Prefetcher<AssetFileDescriptor>? = null
 
-    fun openFile(path: String): AssetFileDescriptor = client.openFile(pack, path)
+    fun openEntry(): AssetFileDescriptor = openFile(entryPath)
+
+    /** Opens [path], from the [prefetch] when it is there. */
+    fun openFile(path: String): AssetFileDescriptor =
+        PackPath.normalize(path)?.let { prefetcher?.take(it) } ?: client.openFile(pack, path)
+
+    /** Starts opening [paths], in this order and [parallelism] at a time, for an engine that
+     * then asks for them one at a time through [openFile]. Each open of a folder file goes
+     * through SAF, about 20 ms, so a large instrument loads several times faster. At most
+     * [window] opened files wait to be taken; what is not taken within [idleMillis] of the
+     * last [openFile] is closed. Replaces an earlier prefetch. */
+    fun prefetch(paths: List<String>, parallelism: Int = 8, window: Int = 64, idleMillis: Long = 10_000) {
+        val wanted = paths.mapNotNull { PackPath.normalize(it) }
+        val previous = prefetcher
+        prefetcher = if (wanted.isEmpty()) null else Prefetcher(wanted, parallelism, window, idleMillis) { client.openFile(pack, it) }
+        previous?.close()
+    }
+
+    /** Closes what was prefetched and not taken. The session stays usable. */
+    override fun close() {
+        prefetcher?.close()
+        prefetcher = null
+    }
 }
 
 class SoundpackUnavailableException(val identity: SoundpackIdentity, cause: Exception?) :

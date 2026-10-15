@@ -707,8 +707,12 @@ Gate:
 Status (2026-10-16): **gate passed on the Galaxy Tab A11+ (Android 16), except the external
 host check, which is blocked (see below).** The libraries are published to Maven
 Local as `org.androidaudioplugin.soundpack:*:0.1.0-dev`, which the three repositories build
-against. The CI of those repositories cannot build them until the libraries are published
-somewhere CI can reach.
+against. In CI, aap-core's reusable `build-sfz-bundle-app.yml` checks out this repository
+and publishes the libraries into Maven Local before building any aap-sfz-* app. sfizz instead
+has this repository as the `external/soundpack-provider-for-android` submodule, like its
+aap-lv2 and aap-core dependencies, and aap-lv2's reusable `build-dist-app.yml` publishes it
+into Maven Local next to them, when a repository has that submodule. This lasts until the
+libraries are published (Phase 7).
 
 - **aap-sfz-salamander-drumkit** (2.0.0) and **aap-sfz-vpo3** (2.0.0): the vendored
   `sfz-provider/` and the old services are gone. Each declares an `SfzAssetPackProvider` with
@@ -756,8 +760,14 @@ salamander 1.0.0:
   the plugin UI (`BAL_ALLOW_VISIBLE_WINDOW`), listing the migrated folder. In the AAP host
   validator, Android blocks it ("Background activity launch blocked"), as S5 measured.
 - With aap-lv2 at `main` (below), sfizz runs in the validator: the instance starts, and its
-  plugin UI loads `ALL.sfz` from the migrated folder (532 regions, about 13 s, because each
-  sample opens through SAF; the "open many" risk in §8).
+  plugin UI loads `ALL.sfz` from the migrated folder (532 regions).
+- Load time of that kit, from a folder shared in the Soundpack Manager: 14.3 s at first,
+  because sfizz opens its 532 samples one at a time at about 23 ms each. Opening them on 8
+  threads cost 6.2 ms each. `SfzReferences` (contract) lists the files an `.sfz` names, as
+  sfizz resolves them; `PackSession.prefetch()` (client) opens them ahead of the engine, 8 at a
+  time with at most 64 waiting, and closes what is not taken within 10 s.
+  `SoundpackResources` uses both, and the load takes 3.5 s. The scan found all 532 samples,
+  and nothing prefetched stayed open.
 - `SoundOutputTest` plays a note and measures the outputs: the default piano, the bundled
   piano through its soundpack identity, and Salamander's kick all make sound.
 
@@ -842,8 +852,9 @@ untouched.
     brought it to 27 ms.
 
   sfizz opens samples one at a time, so an instrument with N samples spends about N × 15 ms
-  opening them. If that is too slow at VPO3 scale, add an "open many" call, or open in
-  parallel on the client side. Local providers inside the app avoid the extra hop: measured
+  opening them. Opening them in parallel on the client side (`PackSession.prefetch()`, Phase
+  4 results) took a 532-sample kit from 14.3 s to 3.5 s. An "open many" call would save the
+  remaining per-call overhead if that is still too slow. Local providers inside the app avoid the extra hop: measured
   in Phase 2, an open through the in-app folder provider costs about 19 ms, of which about
   11 ms is the SAF open itself.
 - **Live folders.** The bytes behind a folder pack can change under a mapping. The current
