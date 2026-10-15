@@ -1,13 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Only the hub holds it: other apps read through the grants the user gives in
-         ConnectActivity, one kind at a time. -->
-    <permission
-        android:name="org.androidaudioplugin.soundpack.manager.permission.READ_SOUNDPACKS"
-        android:label="Read soundpacks shared in Soundpack Manager"
-        android:protectionLevel="signature" />
-
     <application android:label="Soundpack Manager">
         <activity
             android:name=".MainActivity"
@@ -15,16 +8,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
-        <!-- Consent: an app asks for one kind (SoundpackClient.connectIntent()). -->
-        <activity
-            android:name=".ConnectActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="org.androidaudioplugin.soundpack.action.CONNECT" />
-                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
@@ -39,14 +22,13 @@
             </intent-filter>
         </activity>
 
-        <!-- One provider per kind (docs/PLAN.md §3.2), discoverable by its action, readable
-             only through consent grants. -->
+        <!-- One provider per kind (docs/PLAN.md §3.2), discoverable by its action. Like a pack
+             app's provider, every app can read it: sharing a folder here publishes it to every
+             soundpack app. -->
         <provider
             android:name="org.androidaudioplugin.soundpack.host.SfzFolderProvider"
             android:authorities="${applicationId}.soundpack.sfz"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:permission="org.androidaudioplugin.soundpack.manager.permission.READ_SOUNDPACKS">
+            android:exported="true">
             <intent-filter>
                 <action android:name="org.androidaudioplugin.soundpack.sfz.V1" />
             </intent-filter>
@@ -54,9 +36,7 @@
         <provider
             android:name="org.androidaudioplugin.soundpack.host.Sf2FolderProvider"
             android:authorities="${applicationId}.soundpack.sf2"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:permission="org.androidaudioplugin.soundpack.manager.permission.READ_SOUNDPACKS">
+            android:exported="true">
             <intent-filter>
                 <action android:name="org.androidaudioplugin.soundpack.sf2.V1" />
             </intent-filter>
@@ -64,9 +44,7 @@
         <provider
             android:name="org.androidaudioplugin.soundpack.host.JsfxFolderProvider"
             android:authorities="${applicationId}.soundpack.jsfx"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:permission="org.androidaudioplugin.soundpack.manager.permission.READ_SOUNDPACKS">
+            android:exported="true">
             <intent-filter>
                 <action android:name="org.androidaudioplugin.soundpack.jsfx.V1" />
             </intent-filter>

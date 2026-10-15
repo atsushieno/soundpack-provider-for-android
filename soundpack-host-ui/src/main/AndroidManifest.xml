@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <!-- Start it from one of the app's own activities. An AAP plugin UI shown in a host
-             cannot start activities (docs/spikes.md, S5); add folders from the plugin app's
-             own activity instead. -->
+        <!-- The folder screen, opened from the plugin UI ("SFZ folders" in AAP Sfizz). -->
         <activity
             android:name="org.androidaudioplugin.soundpack.host.ui.SoundpackFoldersActivity"
             android:exported="false"

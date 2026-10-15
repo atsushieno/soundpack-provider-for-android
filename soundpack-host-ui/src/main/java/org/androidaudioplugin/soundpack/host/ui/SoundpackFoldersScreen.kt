@@ -217,9 +217,10 @@ private fun FolderCard(
     }
 }
 
-/** [SoundpackFoldersScreen] as an activity, for apps without Compose screens of their own.
- * Start it from one of the app's own activities, never from a UI another app is showing (an
- * AAP plugin UI in a host): Android blocks that (docs/PLAN.md §3.9, "Where setup happens"). */
+/** [SoundpackFoldersScreen] as an activity, for apps without Compose screens of their own. A
+ * plugin UI opens it with FLAG_ACTIVITY_NEW_TASK, as AAP Sfizz's "SFZ folders" button does.
+ * On Android 14+, Android blocks activity starts from a plugin UI embedded in another app's
+ * window (docs/spikes.md, S5). */
 class SoundpackFoldersActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

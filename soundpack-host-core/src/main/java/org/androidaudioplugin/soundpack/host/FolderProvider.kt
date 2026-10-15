@@ -21,8 +21,8 @@ import java.io.IOException
  *
  * Embedding apps declare a `Local<Kind>FolderProvider` with the
  * `${applicationId}.soundpack.local.<kind>` authority, **not exported**: the folders are this
- * app's, granted by its user to this app alone. The hub (Phase 3) exports the same code behind
- * consent. */
+ * app's, granted by its user to this app alone. The hub exports the same code, so that the
+ * folders shared there reach every soundpack app (§3.6). */
 abstract class FolderProvider(kind: SoundpackKind) : SoundpackProvider(kind) {
     private val registry by lazy { FolderRegistry.get(requireNotNull(context)) }
     private val index by lazy { FolderIndex.get(requireNotNull(context)) }
@@ -30,11 +30,6 @@ abstract class FolderProvider(kind: SoundpackKind) : SoundpackProvider(kind) {
     override fun attachInfo(context: Context, info: ProviderInfo) {
         val local = info.authority.split(';').any { it.endsWith(".soundpack.local.${kind.id}") }
         check(!(local && info.exported)) { "${javaClass.name} serves this app's private folders: it must not be exported" }
-        // The user's folders are never public: an exported folder provider (the hub's) is
-        // read only through grants, so it must be guarded by a permission and grant URIs.
-        check(!info.exported || (info.readPermission != null && info.grantUriPermissions)) {
-            "${javaClass.name} is exported, so it needs android:permission and android:grantUriPermissions=\"true\""
-        }
         super.attachInfo(context, info)
     }
 
@@ -127,7 +122,7 @@ abstract class FolderProvider(kind: SoundpackKind) : SoundpackProvider(kind) {
 }
 
 /** The Soundpack Manager's providers: `${applicationId}.soundpack.<kind>`, exported with the
- * kind's discovery action, guarded by a permission, and read through consent grants (§3.6). */
+ * kind's discovery action, and readable by every app like a pack app's provider (§3.6). */
 class SfzFolderProvider : FolderProvider(SoundpackKind.SFZ)
 
 class Sf2FolderProvider : FolderProvider(SoundpackKind.SF2)

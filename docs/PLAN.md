@@ -47,7 +47,7 @@ Deliverables:
 **The hub is never required.** Any app can manage local folders by itself through the
 embedded host core, exactly as sfizz, usf2plugin and uapmd do today, but with shared code.
 What the hub adds is one folder registry shared by all apps: register a folder once, scan it
-once, and grant it per app and per kind.
+once, and every soundpack app sees it (D5).
 
 None of these depend on aap-core. uapmd is not an AAP app, and the libraries must work for it.
 
@@ -155,14 +155,14 @@ the folder work, whether it runs in the hub or embedded in an app:
  Pack APKs (VPO3, Salamander, …)       Soundpack Manager (hub, optional)
    provider SDK:                         host core: SAF trees, index DB
    <provider …soundpack.sfz>             <provider …soundpack.sfz|sf2|jsfx>
-   AssetPackProvider (public read)       exported, consent-gated
+   AssetPackProvider (public read)       exported, public read (D5)
             │                                        │
             └─── ContentResolver: query / openAssetFileDescriptor / call ───┐
                                                                             ▼
  Consumer app (aap-lv2-sfizz plugin process, usf2plugin, uapmd …)
    soundpack-client (Kotlin): discovery, access state, catalog Flow, PackSession, materialize
    soundpack-native (C ABI over JNI): open session, open fd, mmap helper
-   soundpack-ui-compose: picker tree, "manage folders" / "connect" affordances
+   soundpack-ui-compose: picker tree
    embedded host core (opt-in per kind):
      <provider …soundpack.local.sfz>  not exported; this app's own folders, no hub needed
 ```
@@ -172,7 +172,7 @@ From a client's point of view, every source is **just another provider** of a ki
 - **Pack APKs** are public, discovered by action, and read directly. They work without the hub.
 - **The app's own local provider** serves the folders the user registered in this app. It is
   not exported, so no other app can see it, and it needs no consent.
-- **The hub's provider**, when installed and connected, serves the shared registry.
+- **The hub's provider**, when installed, serves the shared registry, like any pack.
 
 The catalog merges all three. A folder registered both locally and in the hub has the same
 pack id (§3.7), so it appears once.
@@ -220,9 +220,8 @@ The URIs are tedious only if someone writes them by hand. Here nobody does:
   DX7 cartridges for dexed) follow the same convention with a reverse-DNS kind id. They need
   no change to the hub's protocol; the hub UI only needs to know their file patterns.
 
-Because grants are made per authority, an app that the user connected for SFZ cannot read
-the user's JSFX or SF2 folders. The separation the user asked for is enforced by the
-permission model, not only by convention.
+Each kind has its own provider, so a folder shared only as SFZ is not served as JSFX or SF2
+(D2).
 
 ### 3.3 URI layout and columns (V1, provisional)
 
@@ -284,42 +283,19 @@ ysfx needs files on disk, so the client provides
 uapmd replaces "clear the mirror, then re-copy everything" with this call, keeping the mirror
 location it already has. Other path-only engines can use the same call.
 
-### 3.6 Access and consent
+### 3.6 Access
 
 - **Pack APK providers** are exported with no permission, because their content is public.
 - **An app's local providers** are not exported. Only the app itself reads them; the user
   consented by picking the folder in that app.
-- **The hub's providers** are exported with a hub-defined `signature` read permission and
-  `grantUriPermissions="true"`. Nobody can read them directly; access is granted per client
-  and per kind.
+- **The hub's providers** are exported with no permission too (D5). Sharing a folder in the
+  Soundpack Manager, or with it from an app ("Share with Soundpack Manager", §3.9), publishes
+  the folder to every soundpack app, as the kinds the user confirms (D2). There is no connect
+  step: an app reads the hub like any pack, and the hub is simply another source.
 
-The hub flow (an app that never connects to the hub still works, using its local folders and
-pack APKs):
-
-1. The client calls `SoundpackClient.hubAccess(kind)` and gets one of `Granted`,
-   `NeedsConsent(intent)` or `HubNotInstalled`. `HubNotInstalled` is not an error; the
-   management screen just offers a link to get the hub.
-2. On `NeedsConsent`, the client launches the hub's `ConnectActivity`, which shows something
-   like "AAP Sfizz wants to read your SFZ soundpacks".
-3. The hub returns `content://<hub>.soundpack.sfz/` with `READ | PERSISTABLE | PREFIX`.
-4. The client calls `takePersistableUriPermission` on exactly that root URI.
-5. The hub's "Connected apps" screen lists each grant and revokes it with
-   `revokeUriPermission`.
-
-Consent is requested from an activity of the app itself, never from a plugin UI that a
-host is showing (§3.9, "Where setup happens"). `SoundpackConnectActivity` in the client
-library does the ask-and-persist step for apps whose UI layer cannot easily handle activity
-results (JUCE, SDL).
-
-**S2 confirmed:** a persistable prefix grant on the root of a custom (non-`DocumentsProvider`)
-provider works:
-
-- it can be taken in an activity;
-- it is usable from every process of the client app;
-- it survives a hub upgrade, a client restart and a reboot;
-- the hub can revoke it for one client or for all.
-
-The allowlist fallback is not needed.
+S2 confirmed that a persistable prefix grant on the root of a custom provider works across
+processes, upgrades and reboots, and can be revoked. The per-app consent flow of Phase 3 was
+built on it; D5 removed that flow.
 
 ### 3.7 Identities and saved state
 
@@ -414,21 +390,20 @@ same code; only the provider's exposure differs.
 - **Management UI (optional).** `soundpack-host-ui` is a Compose screen built on the same
   API. It has one screen per kind with folders, packs and an entry tree, plus "Add folder",
   "Rescan" and pack details (licence/readme). It is shipped inside
-  `SoundpackFoldersActivity`, which an app launches from its own activity: JUCE apps
-  through JNI, SDL apps through `SDL_GetAndroidActivity()`.
+  `SoundpackFoldersActivity`, which an app or its plugin UI opens: JUCE apps through JNI,
+  SDL apps through `SDL_GetAndroidActivity()`.
 
   The hub uses it too. Apps that already depend on Compose (sfizz) take it as is; apps that
   don't (uapmd) can avoid Compose entirely.
 
-**Where setup happens (S5).** Linking a folder and connecting to the hub start activities:
-the system folder picker and the hub's consent screen. Those starts come only from one of
-the app's own activities in the foreground, or happen inside the Soundpack Manager.
+**Where setup happens (D5).** In the plugin UI, because DAWs only open the plugin UI. A
+plugin app's own activities are not changed for soundpack setup. The plugin UI opens the
+folder screen (`SoundpackFoldersActivity`; "SFZ folders" in sfizz), which links folders
+through the system picker. The Soundpack Manager needs no setup step in clients (§3.6).
 
-A UI that another app is showing, such as an AAP plugin UI embedded in a host, only browses
-and selects (`SoundpackPicker`). When nothing is available there, it says where to add
-content, and it never starts an activity. Linking and consent are one-time setup, so nothing
-is lost. No host or plugin needs an extra privilege, and nothing changes for apps that do
-not use soundpacks.
+S5 measured that, on Android 14+, Android blocks activity starts from a plugin UI embedded
+in another app's window, unless the host binds with `BIND_ALLOW_ACTIVITY_STARTS`. The
+design does not ask hosts for that privilege (§8).
 
 **Embedded mode** (an app opts in per kind):
 
@@ -439,11 +414,10 @@ not use soundpacks.
 
 **Hub mode adds:**
 
-- exported providers and the consent flow (§3.6);
-- a "Connected apps" screen;
-- one tab per kind for everything the hub serves.
+- exported providers that every app reads (§3.6);
+- a browser over everything installed, per kind.
 
-**When an app has local folders and the hub is connected:**
+**When an app has local folders and the hub is installed:**
 
 - The catalog shows both. Packs with the same deterministic id (§3.7) are shown once, and
   the local provider wins, so no IPC is needed.
@@ -467,14 +441,14 @@ soundpack-provider-for-android/
   soundpack-provider-sdk/       SoundpackProvider base (URI layout, rules) + AssetPackProvider
                                 and its res/xml metadata parser
   soundpack-client/             Kotlin client + prefab native module (C ABI, JNI, mmap helper)
-  soundpack-ui-compose/         SoundpackPicker (generalised SfzTree), access/connect affordances
+  soundpack-ui-compose/         SoundpackPicker (generalised SfzTree)
   soundpack-host-core/          folder sources, SAF walker, pipe→cache, index DB, kind indexers,
                                 folder provider base + Local<Kind>FolderProvider classes,
                                 UI-free host API + folder-picker activity (no Compose)
   soundpack-host-ui/            optional Compose folder management screens + SoundpackFoldersActivity
   soundpack-testkit/            provider conformance tests runnable against any authority
   app/                          Soundpack Manager hub: host core + host UI + exported providers,
-                                consent, connected apps
+                                folder sharing
   samples/                      sample-sfz-pack (ported sample-sfz-provider), sample-sf2-pack, sample-jsfx-pack,
                                 embedded-client (embedded folder mode, Phase 2 gate tests)
   tools/                        make-sample-sf2.py (generates the sample SoundFonts)
@@ -558,7 +532,7 @@ soundpack-provider-for-android/
 
 | Consumer | What changes |
 | --- | --- |
-| **aap-lv2-sfizz** | Delete `SfzResourceClient`, `SfzFolders`, `SfzFoldersActivity`, `SfzTree` and the `:sfz-provider` / `:sample-sfz-provider` modules. Declare `LocalSfzFolderProvider`, so local folders keep working without the hub. The existing `sfz-folders` trees are carried over on first launch, reusing their grants (§3.7). `SfzResourceViewFactory`, the plugin UI that external hosts also show, uses `SoundpackPicker(kind = SFZ)` only, with a hint to open AAP Sfizz to add folders or connect the hub. "Manage folders" (`SoundpackFoldersActivity`) and hub consent move to `SfizzActivity`, the app's own activity (S5). A `PackSession` adapts directly to the existing `AudioPluginLV2ResourceBridge.Snapshot` (entry, names, lazy opener), so `AudioPluginLV2Resources_jni.cpp` and the sfizz patch are unchanged at first. Later the native mapping moves onto `soundpack-native`, and every pack goes through the lazy (ABI v2) path. `BundledSfzResourceService` becomes an SDK `<provider>`, or an in-process asset source if the piano should stop being advertised to other apps. Old `aap-sfz://` states restore as unavailable (§3.7). |
+| **aap-lv2-sfizz** | Delete `SfzResourceClient`, `SfzFolders`, `SfzFoldersActivity`, `SfzTree` and the `:sfz-provider` / `:sample-sfz-provider` modules. Declare `LocalSfzFolderProvider`, so local folders keep working without the hub. The existing `sfz-folders` trees are carried over on first launch, reusing their grants (§3.7). `SfzResourceViewFactory`, the plugin UI, uses `SoundpackPicker(kind = SFZ)` and keeps its "SFZ folders" button, which now opens `SoundpackFoldersActivity` (D5). `SfizzActivity` is not changed. A `PackSession` adapts directly to the existing `AudioPluginLV2ResourceBridge.Snapshot` (entry, names, lazy opener), so `AudioPluginLV2Resources_jni.cpp` and the sfizz patch are unchanged at first. Later the native mapping moves onto `soundpack-native`, and every pack goes through the lazy (ABI v2) path. `BundledSfzResourceService` becomes an SDK `<provider>`, or an in-process asset source if the piano should stop being advertised to other apps. Old `aap-sfz://` states restore as unavailable (§3.7). |
 | **aap-sfz-vpo3, aap-sfz-salamander-drumkit** | Remove the vendored `sfz-provider/`. Depend on `soundpack-provider-sdk`, and declare the provider and XML (vpo3 keeps its code-generated list; `resourcePaths` becomes `scopes`). This is a clean break: release them together with the new sfizz, and say in the release notes that all three must be updated, because old and new versions cannot see each other. |
 | **aap-juce-usf2plugin** | Rewrite the Android hunks of `aap-juce-support.patch`. Declare `LocalSf2FolderProvider`. `SoundFontDirectory`'s tree-URL branch becomes "soundpack packs of kind SF2", taken from the local provider plus the hub when connected. `scanDocumentTree`/`findDocument`/`readPresetHeaders` over SAF become index queries, with presets taken from entry metadata. `SoundFontFile::loadData` maps the file instead of copying it. `sf2Absolute` stores the identity. Existing tree URLs in the `sf2Folders` setting are carried over to the local provider once, reusing their grants. On Android, the folder part of `DirectorySettingsPanel` keeps its JUCE look but runs on the UI-free host API through the C API (§3.9). Adding a folder starts the system picker, so it is offered only when the editor runs in the plugin app's own activity; inside a host, the panel lists the folders and says where to add them (S5). Desktop is unaffected. |
 | **uapmd** | Declare `LocalJsfxFolderProvider` and add an Android-only JSFX source. `AppModel::syncJsfxRegisteredFolders` calls `soundpack_materialize("jsfx", pack, jsfxFolderMirrorRoot()/<name>)` for each JSFX pack in the catalog: local folders, plus the hub's when connected. Registered folders from `jsfxRegisteredFolders()` are carried over to the local provider once, reusing their grants. On Android, the registered-folder part of `JsfxResourcesWindow` stays in ImGui but runs on the UI-free host API through the C API, so uapmd takes on no Compose dependency. `IDocumentProvider` stays for project and file documents. Desktop and wasm are unaffected. |
@@ -592,9 +566,9 @@ Gate: each spike either passes, or its fallback (§3.6, §3.8, §3.9) is chosen 
 into the contract.
 
 Status: **done** (2026-10-15) on a Galaxy Tab A11+ (Android 16) and an Android 15
-emulator. S1–S4 and S6 pass. S5 found that a plugin UI shown in another app's host cannot
-start activities. Rather than asking hosts for a privilege, the design keeps setup out of
-embedded UIs (§3.9, "Where setup happens"; §8).
+emulator. S1–S4 and S6 pass. S5 found that, on Android 14+, a plugin UI shown in another
+app's host cannot start activities unless the host lends a privilege, which the design does
+not ask for (D5, §8).
 
 **Phase 1: contract, provider SDK, client, samples.**
 
@@ -622,8 +596,9 @@ Status (2026-10-15): **in progress.** Done in this repository:
   every sample provider, the SFZ include and sample opened across APKs, SF2 presets from
   metadata, incremental materialize, the revision policies, and the catalog flow.
 
-Not done: porting vpo3 and salamander (their own repositories), and therefore the VPO3 part
-of the gate.
+vpo3 and salamander are ported in their own repositories (Phase 4 has the details). On the
+Galaxy Tab (2026-10-16), vpo3 conforms and lists its 454 entries in one query, which completes
+this gate.
 
 **Phase 2: host core and embedded mode.** No hub yet.
 
@@ -678,69 +653,46 @@ Decisions made while building it:
 **Phase 3: hub app.**
 
 - The host core behind exported providers.
-- Consent and "Connected apps".
 - Merging local and hub folders with de-duplication; "Share with Soundpack Manager".
 
-Gate:
+Gate (as changed by D5, 2026-10-16; the first version gated per-app consent):
 
-- a test client sees hub folders only for the kinds it was granted;
-- revoking a grant is honoured;
+- a test client reads hub folders with no connect step, for every kind;
 - a folder registered both locally and in the hub appears once;
 - uninstalling the hub leaves local folders working.
 
-Status (2026-10-15): **gate passed** on the Galaxy Tab A11+ (Android 16). Built:
+Status (2026-10-15): **gate passed** on the Galaxy Tab A11+ (Android 16), with per-app
+consent. D5 (2026-10-16) removed consent; the changed gate is in "Phase 4 results" below.
+Built:
 
 - **`app/`, the Soundpack Manager** (`org.androidaudioplugin.soundpack.manager`). It has
-  `Sfz/Sf2/JsfxFolderProvider`: exported, discoverable by action, guarded by the hub-only
-  `…permission.READ_SOUNDPACKS` signature permission, with `grantUriPermissions`. Its
+  `Sfz/Sf2/JsfxFolderProvider`: exported with no permission and discoverable by action. Its
   screens:
-  - `ConnectActivity`: per-kind consent, naming the caller and saying what it will be able
-    to read (D2);
   - `ShareFolderActivity`: takes a folder an app shares, after the user confirms kinds;
-  - `MainActivity`: Folders (the host-ui screen, for all kinds), Browse (`SoundpackPicker`
-    over everything installed), and Connected apps (disconnect revokes at once).
-
-  Android does not tell a provider who holds its grants, so the hub keeps its own record of
-  connections.
-- **Client**:
-  - `SoundpackClient.hubAccess()`, which reports `NotInstalled`, `Granted` or
-    `NeedsConsent`;
-  - `connectIntent()`, `takeHubGrant()` and `releaseHubGrant()`;
-  - the `SoundpackConnectActivity` trampoline, for apps whose UI layer cannot easily
-    handle activity results; it is started from the app's own activity;
-  - `Failure.needsConsent`, so the hub's refusal shows as a connect action rather than an
-    error.
-
-  `SoundpackPicker` gained `onConnectHub` and `refreshKey`, because grants do not notify
-  observers. Without `onConnectHub`, as in an embedded plugin UI, it shows a passive hint
-  instead of a button.
-- **Host core**: `FolderRegistry.shareWithHubIntent()`, a "Share with Soundpack Manager"
-  button on folder cards, and a check that refuses to run an exported folder provider
-  without a permission and URI grants. Hub constants are in `SoundpackContract.Hub`.
-- **`HubGateTest`** (in `samples/embedded-client`) passes, through the real hub screens
-  and the system picker:
-  - before consent, the hub refuses, and the catalog says "needs consent";
-  - after connecting for SFZ only, SF2 is still refused;
+  - `MainActivity`: Folders (the host-ui screen, for all kinds) and Browse
+    (`SoundpackPicker` over everything installed).
+- **Client**: `SoundpackClient.hubEndpoint()`; the hub is otherwise read like any pack.
+  `SoundpackPicker` has `refreshKey` to reload the catalog.
+- **Host core**: `FolderRegistry.shareWithHubIntent()`, and a "Share with Soundpack Manager"
+  button on folder cards. A local folder provider refuses to run if exported. Hub constants
+  are in `SoundpackContract.Hub`.
+- **`HubGateTest`** (in `samples/embedded-client`), through the real hub screens and the
+  system picker:
+  - the hub answers for SFZ and SF2 with no connect step;
   - a folder shared with the hub appears once, with the local provider first;
-  - the hub conforms through the grant;
+  - the hub's SFZ and SF2 providers conform;
   - a saved identity falls back to the hub once the local folder is unlinked;
-  - disconnecting in Connected apps ends access at once;
   - the opt-in test (`-e allowHubUninstall true`): with the hub uninstalled, local folders
     still list, open and conform.
-
-  The Phase 1 and Phase 2 suites still pass with the hub installed.
 
 Decisions made while building it:
 
 - **The shared folder goes in ClipData.** The share intent carries the tree URI in its
   ClipData rather than its data, so the hub's intent filter matches without a MIME type.
   The grant flags cover ClipData, with PREFIX as S6 requires.
-- **The hub's `call()` needs no extra check.** Android already refuses to open the provider
-  for an app without the permission or a grant.
 
 **Phase 4: sfizz migration**, released together with vpo3 and salamander (D4). The
-`sfz-folders` trees carry over. Folder management and hub consent move from the plugin UI
-into `SfizzActivity` (§3.9, "Where setup happens").
+`sfz-folders` trees carry over. Folder management stays in the plugin UI (D5).
 
 Gate:
 
@@ -751,6 +703,84 @@ Gate:
 - previously registered folders appear without re-picking;
 - an external AAP host can select and restore instruments, and the plugin UI it shows starts
   no activities.
+
+Status (2026-10-16): **gate passed on the Galaxy Tab A11+ (Android 16), except the external
+host check, which is blocked (see below).** The libraries are published to Maven
+Local as `org.androidaudioplugin.soundpack:*:0.1.0-dev`, which the three repositories build
+against. The CI of those repositories cannot build them until the libraries are published
+somewhere CI can reach.
+
+- **aap-sfz-salamander-drumkit** (2.0.0) and **aap-sfz-vpo3** (2.0.0): the vendored
+  `sfz-provider/` and the old services are gone. Each declares an `SfzAssetPackProvider` with
+  an XML pack (`org.androidaudioplugin.sfz.salamander-drumkit`, 9 entries;
+  `org.studiorack.vpo3`, 454 entries with per-family `scopes`). Each has a `ProviderTest`
+  that runs the conformance suite and counts the entries in one query.
+- **aap-lv2-sfizz**:
+  - The `sfz-provider/` and `sample-sfz-provider/` modules are gone, and so are
+    `SfzResourceClient`, `SfzFolders`, `SfzFoldersActivity`, `SfzTree` and
+    `BundledSfzResourceService`.
+  - The bundled piano is an `SfzAssetPackProvider`
+    (`io.github.sfzinstruments.splendid-grand-piano`). The app's own folders use
+    `LocalSfzFolderProvider`.
+  - `SoundpackResources` implements the native bridge's `Provider` with `SoundpackClient`,
+    and opens each file only when sfizz asks for it. The native bridge is unchanged.
+  - The plugin UI uses `SoundpackPicker`, and keeps its "SFZ folders" button, which opens
+    `SoundpackFoldersActivity` (D5). `SfizzActivity` is unchanged.
+  - `SfzSetupInitializer` moves the `sfz-folders` trees into `FolderRegistry` once.
+  - Device tests:
+    - `SoundpackResourcesTest` replaces `SfzResourceClientTest`. It runs the bundled piano's
+      conformance, opens it for the bridge, and rejects an `aap-sfz://` identity.
+    - `StatePersistenceTest` finds Salamander through the client. It checks that the state
+      holds the `commons-soundpack://` identity, and restores it off and on the main thread.
+      It also restores a state whose identity is a 0.6 `aap-sfz://` one, and a state saved in
+      another process (two instrumentation runs, `-e stateRestart save|restore`).
+    - `SfzFolderMigrationTest` links a folder the way 0.6 did (system picker, the app's grant,
+      the `sfz-folders` list) and checks that it carries over.
+  - No new permissions in the merged manifest.
+
+Results on the Galaxy Tab, with the ports installed over sfizz 0.6.2, vpo3 1.0.0 and
+salamander 1.0.0:
+
+- Salamander and vpo3 `ProviderTest`s pass.
+- The sfizz suite (12 tests) passes. Before D5 it ran with the hub not connected and with it
+  connected; after D5, again against the hub with no connect step. The hub was never
+  uninstalled for these runs.
+- Saved selections: Salamander's `commons-soundpack://` state restores in a fresh instance
+  and in a new process, with the same 535 regions and samples. A 0.6 `aap-sfz://` state
+  restores with no instrument and keeps the selection.
+- Migration with real data: sfizz 0.6.2 had `Download/SFZ` linked. On first start it was
+  linked again without picking, with all 1,199 SFZ entries, and the old list was removed.
+- After D5 (2026-10-16): the client suite (6 tests) passes with the hub installed and
+  reports no failure for it; `HubGateTest` passes (the opt-in uninstall case was not run).
+- The plugin UI's "SFZ folders" opens `SoundpackFoldersActivity` when sfizz's own app shows
+  the plugin UI (`BAL_ALLOW_VISIBLE_WINDOW`), listing the migrated folder. In the AAP host
+  validator, Android blocks it ("Background activity launch blocked"), as S5 measured.
+- With aap-lv2 at `main` (below), sfizz runs in the validator: the instance starts, and its
+  plugin UI loads `ALL.sfz` from the migrated folder (532 regions, about 13 s, because each
+  sample opens through SAF; the "open many" risk in §8).
+- `SoundOutputTest` plays a note and measures the outputs: the default piano, the bundled
+  piano through its soundpack identity, and Salamander's kick all make sound.
+
+Problems found that are not caused by the migration:
+
+- **No sound in hosts: fixed.** sfizz's metadata declared the extensions BOM `0.12.1`, which
+  includes the buses extension, while sfizz still built against aap-lv2 0.6.2 and aap-core
+  0.11.2, which have none. A 0.12 host (the validator) called the buses extension right
+  after creating an instance, and sfizz's service crashed with a null function call in
+  `aap::LocalPluginInstance::controlExtension`. String Machine (aap-lv2 0.6.2, BOM `0.12.0`)
+  ran fine in the same host. Fix: `external/aap-lv2` moves to aap-lv2 `main` (`8f34325`,
+  with aap-core `6572b1d9`). sfizz's `gradle/libs.versions.toml` is a symlink into it, so the
+  build now uses aap-lv2 0.7.0 and aap-core 0.12.0.
+- `StatePersistenceTest` failed after `PluginTest` in the same process, with or without the
+  migration. `AudioPluginServiceHelper.getServiceInstance(pluginId)` outside an instance scope
+  returns the first service bound for the plugin, which is another test's. The test now calls
+  the per-instance lookup reflectively; aap-core would need a public
+  `getServiceInstance(pluginId, instanceId)` to avoid that.
+- Samsung's restriction manager refused to start vpo3's process for provider queries
+  ("Restricted by policy: 8"), from sfizz and from the shell alike, so VPO3 was missing from
+  the catalog. vpo3 was in standby bucket 45 (rare); Salamander, in bucket 10 (active), was
+  allowed. After vpo3 was opened once from the launcher, it moved to bucket 10 and its
+  provider answered again. See §8, "Pack apps nobody opens".
 
 **Phase 5: native C API and usf2plugin.**
 
@@ -798,8 +828,8 @@ untouched.
 - **Cross-app scenarios** on CI with the emulator. Install the sample packs and a test
   client, then run:
   - the cases with no hub installed;
-  - with the hub: grant, revoke, local/hub de-duplication, and uninstalling the hub or a
-    provider.
+  - with the hub: reading it with no connect step, local/hub de-duplication, and
+    uninstalling the hub or a provider.
 
 
 8. Risks
@@ -819,19 +849,25 @@ untouched.
 - **Live folders.** The bytes behind a folder pack can change under a mapping. The current
   advice stays: do not modify samples while they are in use, and reselect to reload.
 - **Grant limits.** Android caps the number of persisted URI grants per app (historically
-  128, raised on newer releases). An app holds one grant per hub kind plus one per local
-  folder, which is the same as today's per-app folder lists.
+  128, raised on newer releases). An app holds one grant per local folder, which is the
+  same as today's per-app folder lists.
 - **Folders in two places.** Embedded mode means the same folder can be registered in
   several apps and scanned by each. That is the price of not requiring the hub. De-duplication
   by deterministic pack id keeps the catalog clean. The "managed in" label and "Share with
   Soundpack Manager" give users a way to consolidate, but they are never forced to.
 - **Embedded plugin UIs cannot start activities (S5).** On Android 14+, a plugin UI shown
   in another app's host counts as a background app, and starting any activity from it is
-  blocked (`BAL_BLOCK`). Only the host could lend that right, to every plugin it binds. We
-  do not ask for it. The design keeps every activity start out of embedded UIs (§3.9, "Where
-  setup happens"), so no host or plugin needs an extra privilege and nothing changes for
-  apps that do not use soundpacks. sfizz's current folder button in its plugin UI has the
-  same problem in external hosts; Phase 4 moves it to sfizz's own activity.
+  blocked (`BAL_BLOCK`). Only the host could lend that right, to every plugin it binds, and
+  we do not ask for it. Setup still lives in the plugin UI (D5): its folder button opens the
+  folder screen, which works where the plugin UI may start activities, and is blocked in an
+  external host on Android 14+.
+- **Pack apps nobody opens.** A pack app is usually installed and never opened, so its
+  standby bucket drifts to "rare". On a Galaxy Tab (Android 16), Samsung's restriction
+  manager then refuses to start its process for provider queries, and its packs vanish from
+  every catalog until the user opens the app once (Phase 4 results). Clients cannot lift
+  this. Phase 7: report such an endpoint as a failure that names the app and says to open it
+  (it is discovered, but its provider cannot be acquired). Pack apps should keep a launcher
+  screen, as vpo3 does, so that users have a way to wake them. Check whether other vendors do the same.
 
 
 9. Decisions
@@ -857,14 +893,14 @@ untouched.
     gets no extension allowlist, because samples, includes, tunings and images can have any
     name, and filtering would break unusual packs. SF2 serves only the `.sf2`/`.sf3` entry
     files, which are still browsed by their folder hierarchy.
-  - **Consent wording.** The hub's consent screen says that apps connected for SFZ or JSFX
-    can read every file in folders shared as that kind.
+  - **Share wording.** The hub's share screen says that every soundpack app can read the
+    folder, as the kinds the user confirms. For SFZ and JSFX that is every file in it.
   *Alternative rejected:* sharing every folder automatically as every kind it contains. That
   silently widens access whenever a file is added, and pays parsing costs nobody asked for.
 
 - **D3. Names and dependencies.** *Resolved 2026-10-15:*
   - **Names.** The Android wiring that can never change (actions, `<meta-data>` names, the
-    hub's applicationId and permission, the Maven group) goes under
+    hub's applicationId, the Maven group) goes under
     `org.androidaudioplugin.soundpack`. The identity scheme is `commons-soundpack://`: it
     marks the identity as meant for common use, independent of AAP or Android, and the
     `commons-` prefix keeps it distinct (§3.7).
@@ -878,5 +914,15 @@ untouched.
   - sfizz, vpo3 and salamander are released together, with release notes saying all three
     must be updated.
   - Folder registrations still carry over, because they are not URIs.
+- **D5. Where setup happens, and access to the hub.** *Resolved 2026-10-16:*
+  - **Setup is handled in the plugin UI**, because DAWs only open the plugin UI. A plugin
+    app's own activities are never changed for soundpack setup. The plugin UI keeps its
+    folder screen ("SFZ folders" in sfizz), which links folders through the system picker.
+  - **No per-app consent.** The hub's providers are exported with no permission, like a pack
+    app's. Sharing a folder in the Soundpack Manager publishes it to every soundpack app, and
+    the Manager is simply another source for clients.
+  - This removes the consent screen, "Connected apps", `SoundpackClient.hubAccess()` and its
+    connect calls, `SoundpackConnectActivity`, and the picker's connect button and setup
+    hint. It also undoes the Phase 4 move of setup into `SfizzActivity`.
 
 All decisions are settled.

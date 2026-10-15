@@ -31,23 +31,14 @@ object SoundpackContract {
     const val SOURCE_FOLDER = "folder"
 
     /** The Soundpack Manager (the hub, docs/PLAN.md §3.6). Its providers follow the usual
-     * `<package>.soundpack.<kind>` authorities and are read only through a grant the user
-     * gives in its consent screen. */
+     * `<package>.soundpack.<kind>` authorities, and every app can read them like a pack app's:
+     * a folder shared there reaches every soundpack app. */
     object Hub {
         const val PACKAGE = "org.androidaudioplugin.soundpack.manager"
-        /** Guards the hub's providers; only the hub holds it. */
-        const val PERMISSION_READ = "$PACKAGE.permission.READ_SOUNDPACKS"
-        /** Start for a result with [EXTRA_KIND]. On consent, the result's data is
-         * `content://<hub authority>/`, granted READ | PERSISTABLE | PREFIX. */
-        const val ACTION_CONNECT = "$NAMESPACE.action.CONNECT"
         /** Shares a folder an app has linked: the tree URI is in the ClipData, granted READ |
          * PERSISTABLE | PREFIX (S6), and [EXTRA_KINDS] proposes kinds. The hub asks the user. */
         const val ACTION_SHARE_FOLDER = "$NAMESPACE.action.SHARE_FOLDER"
-        const val EXTRA_KIND = "$NAMESPACE.extra.KIND"
         const val EXTRA_KINDS = "$NAMESPACE.extra.KINDS"
-
-        /** The URI a consent grant covers, as the hub returns it and clients persist it. */
-        fun rootUriString(authority: String) = "content://$authority/"
     }
 
     object Packs {

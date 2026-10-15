@@ -222,7 +222,8 @@ Fill in one column per device, then update the [spike] markers in `docs/PLAN.md`
 
 - **S1, S2, S3: confirmed.** No fallback is needed: provider discovery by
   `<queries><intent>`, consent through a persistable prefix grant on the authority root, and
-  APK sub-ranges across processes all work as planned.
+  APK sub-ranges across processes all work as planned. (PLAN D5 later dropped per-app consent
+  for the hub, so the S2 grant is no longer used.)
 - **S4: confirmed, with two requirements.**
   - The folder provider must fill in `declaredLength` from `st_size`, because
     ExternalStorageProvider reports −1.
@@ -232,14 +233,11 @@ Fill in one column per device, then update the [spike] markers in `docs/PLAN.md`
   Going through the hub costs about 3–5 ms per open over a direct SAF open. sfizz opens
   samples lazily, so an instrument with N samples spends roughly N × 15 ms opening them.
   That is the "open many" risk in PLAN §8; it is now measured, not guessed.
-- **S5: embedded plugin UIs must not start activities.** On Android 14+, a plugin UI hosted
+- **S5: embedded plugin UIs cannot start activities.** On Android 14+, a plugin UI hosted
   by `AudioPluginViewService` in another app cannot start any activity. Only the host could
-  lift that, by lending the privilege to every plugin it binds. Instead, the design keeps
-  the activities that need starting out of embedded UIs: the folder picker, the folder
-  screen and the hub's consent screen. They run from the app's own activity, or in the
-  Soundpack Manager, and the embedded UI only browses and selects (PLAN §3.9, "Where setup
-  happens"). sfizz's existing `SfzFoldersActivity` button has the same problem in external
-  hosts and moves to sfizz's own activity in Phase 4.
+  lift that, by lending the privilege to every plugin it binds, and the design does not ask
+  for it. Setup still lives in the plugin UI (PLAN D5): its folder button opens the folder
+  screen, and the hub needs no consent screen.
 - **S6: works when the delegation includes `FLAG_GRANT_PREFIX_URI_PERMISSION`**, so
   "Share with Soundpack Manager" needs no fallback.
 

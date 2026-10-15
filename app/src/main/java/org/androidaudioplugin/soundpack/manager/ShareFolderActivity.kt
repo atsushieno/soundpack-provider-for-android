@@ -72,7 +72,7 @@ class ShareFolderActivity : ComponentActivity() {
                         }
                         val name = DocumentsContract.getTreeDocumentId(tree).substringAfterLast(':')
                         Text("Share $name with Soundpack Manager?", style = MaterialTheme.typography.headlineSmall)
-                        Text("$senderLabel offers this folder. Apps you connect for the kinds below will be able to read it.")
+                        Text("$senderLabel offers this folder. Every soundpack app will be able to read it, as the kinds below.")
                         status?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         val counts = detected
                         if (counts == null && status == null)

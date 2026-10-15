@@ -37,7 +37,8 @@ import org.androidaudioplugin.soundpack.host.FolderRegistry
 import org.androidaudioplugin.soundpack.host.ui.SoundpackFoldersActivity
 import org.androidaudioplugin.soundpack.ui.SoundpackPicker
 
-/** Picks SFZ or SF2 entries from installed packs and from this app's own linked folders. */
+/** Picks SFZ or SF2 entries from installed packs, this app's own linked folders, and the folders
+ * shared in the Soundpack Manager. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,9 +59,6 @@ private fun SampleScreen() {
     var selected by remember(kind) { mutableStateOf<SoundpackClient.Entry?>(null) }
     var detail by remember { mutableStateOf("") }
     var linkResult by remember { mutableStateOf<String?>(null) }
-    var refresh by remember { mutableStateOf(0) }
-    // Connecting to the Soundpack Manager: the grant does not notify observers, so reload.
-    val connect = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh++ }
 
     // The UI-free path: SoundpackFolderPickerActivity picks and links in one go.
     val link = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -84,8 +82,7 @@ private fun SampleScreen() {
             OutlinedButton(onClick = { link.launch(registry.pickFolderIntent()) }) { Text("Link folder (UI-free)") }
         }
         linkResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        SoundpackPicker(client, selected?.let { client.identityOf(it) }, onSelect = { selected = it }, Modifier.weight(1f).fillMaxWidth(),
-            onConnectHub = { connect.launch(client.connectActivityIntent()) }, refreshKey = refresh)
+        SoundpackPicker(client, selected?.let { client.identityOf(it) }, onSelect = { selected = it }, Modifier.weight(1f).fillMaxWidth())
         selected?.let { entry ->
             LaunchedEffect(entry) { detail = withContext(Dispatchers.IO) { describe(client, entry) } }
             Text(client.identityOf(entry).format(), style = MaterialTheme.typography.bodySmall)

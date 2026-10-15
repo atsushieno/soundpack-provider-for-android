@@ -8,11 +8,14 @@ Status:
 
 - **Phase 0** (platform spikes): done.
 - **Phase 1** (contract, provider SDK, client, test kit): done and passing on devices,
-  except that the existing pack apps are not ported yet.
+  including the ported vpo3 and salamander.
 - **Phase 2** (host core, embedded folder mode): its gate passes, so apps can link their own
   folders.
-- **Phase 3** (the Soundpack Manager hub): its gate passes. Apps connect per kind, folders
-  can be shared with the hub, and connections can be revoked.
+- **Phase 3** (the Soundpack Manager hub): its gate passes. Folders shared in the hub reach
+  every soundpack app, with no connect step (D5).
+- **Phase 4** (aap-lv2-sfizz on these libraries, with vpo3 and salamander): its gate passes
+  on the Galaxy Tab, except the external host check. That one waits for sfizz to move to
+  aap-core 0.12, because hosts built on 0.12 crash sfizz 0.11.2's plugin service.
 
 - [docs/PLAN.md](docs/PLAN.md): survey of the existing implementations, the architecture,
   the decisions taken, and the phases with their status.
@@ -29,8 +32,8 @@ Status:
 | `soundpack-host-core` | Linked folders without any UI toolkit: `FolderRegistry`, the folder index, `Local{Sfz,Sf2,Jsfx}FolderProvider`, and a picker activity that links in one step. |
 | `soundpack-host-ui` | Optional Compose folder management: `SoundpackFoldersScreen` / `SoundpackFoldersActivity`. |
 | `soundpack-ui-compose` | `SoundpackPicker`: every readable pack's entries as a tree. |
-| `app` | The Soundpack Manager (`org.androidaudioplugin.soundpack.manager`): folders shared with every app, behind per-kind consent. |
-| `samples/` | One small pack APK per kind, and `embedded-client`, an app with its own folders that also connects to the hub. |
+| `app` | The Soundpack Manager (`org.androidaudioplugin.soundpack.manager`): folders shared with every soundpack app. |
+| `samples/` | One small pack APK per kind, and `embedded-client`, an app with its own folders that also reads the hub. |
 | `spikes/` | Phase 0 throwaway APKs. |
 
 ## Build and test
@@ -62,9 +65,8 @@ adb shell rm -rf /sdcard/Music/SoundpackLargeTest
 ```
 
 The hub tests (`HubGateTest`) need the hub installed first. They change the hub's state while
-they run: they connect and disconnect the sample app, and share a test folder and remove it
-again. They also read every folder already shared as SFZ there, to run the conformance
-checks. Prefer a device whose hub holds no personal folders. One of them uninstalls the hub,
+they run: they share a test folder and remove it again. They also read every folder already
+shared as SFZ or SF2 there, to run the conformance checks. Prefer a device whose hub holds no personal folders. One of them uninstalls the hub,
 so it runs only when asked:
 
 ```sh
@@ -77,21 +79,18 @@ so it runs only when asked:
 
 ## Reading the Soundpack Manager's folders
 
-The hub's providers are discovered like any pack, but each kind needs the user's consent.
-`SoundpackClient.hubAccess()` tells you whether you have it. When it returns
-`NeedsConsent`, start `connectActivityIntent()`, which asks the hub and keeps the grant.
-`SoundpackPicker` shows a connect button when you pass `onConnectHub`.
+The hub's providers are discovered and read like any pack: there is no connect step. A folder
+the user shares in the Soundpack Manager reaches every soundpack app, as the kinds the user
+confirms there.
 
 ## Where setup happens
 
-Connecting to the hub and linking folders open other screens: the hub's consent screen and
-the system folder picker. Start them only from one of your app's own activities. A UI that
-another app shows cannot start activities on Android 14+, and these libraries do not ask
-hosts to change that. An AAP plugin UI embedded in a host is such a UI.
+In the plugin UI, because DAWs only open the plugin UI. Do not add soundpack setup to the
+plugin app's own activities. The plugin UI opens the folder screen (`SoundpackFoldersActivity`)
+with `FLAG_ACTIVITY_NEW_TASK`, as AAP Sfizz's "SFZ folders" button does.
 
-In those UIs, use `SoundpackPicker` to browse and select only. Leave `onConnectHub` null, and
-pass a `setupHint` such as "Open AAP Sfizz to add folders". Setup is a one-time step that the
-user does in the plugin app itself or in the Soundpack Manager.
+On Android 14+, Android blocks activity starts from a plugin UI embedded in another app's
+window (docs/spikes.md, S5). These libraries do not ask hosts to lift that.
 
 ## Letting users link their own folders
 
@@ -112,8 +111,7 @@ of:
 - `SoundpackFoldersActivity`, the Compose folder screen;
 - `FolderRegistry` directly, from your own UI.
 
-The first two start activities, so they are for your app's own activities (see "Where setup
-happens").
+The first two start activities; see "Where setup happens".
 
 ## Publishing a pack
 

@@ -3,8 +3,8 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
-// The Soundpack Manager (the hub, docs/PLAN.md §3.6, §3.9): the host core behind exported,
-// consent-gated providers, plus consent, sharing and "Connected apps".
+// The Soundpack Manager (the hub, docs/PLAN.md §3.6, §3.9): the host core behind exported
+// providers, so that folders shared here reach every soundpack app.
 android {
     namespace = "org.androidaudioplugin.soundpack.manager"
     compileSdk = libs.versions.android.compileSdk.get().toInt()

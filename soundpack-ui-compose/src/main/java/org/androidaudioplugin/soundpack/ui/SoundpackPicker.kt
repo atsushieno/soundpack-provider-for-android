@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,15 +35,7 @@ fun SoundpackPicker(
     selected: SoundpackIdentity?,
     onSelect: (SoundpackClient.Entry) -> Unit,
     modifier: Modifier = Modifier,
-    /** Shown as a button when the Soundpack Manager is installed but this app is not connected
-     * for the kind; start [SoundpackClient.connectActivityIntent] from it. Pass it only from
-     * one of the app's own activities. Leave it null in a UI another app is showing (an AAP
-     * plugin UI in a host); the picker then shows [setupHint] instead (docs/PLAN.md §3.9). */
-    onConnectHub: (() -> Unit)? = null,
-    /** Where the user goes to add content or connect the hub, for UIs that cannot start
-     * activities, e.g. "Open AAP Sfizz to add folders". */
-    setupHint: String? = null,
-    /** Change it to reload, e.g. after connecting: grants do not notify observers. */
+    /** Change it to reload the catalog. */
     refreshKey: Any? = null,
 ) {
     var packs by remember(client) { mutableStateOf<List<PackEntries>?>(null) }
@@ -72,12 +63,7 @@ fun SoundpackPicker(
             packs == null -> Text("Looking for ${client.kind.id.uppercase()} content…", Modifier.padding(12.dp))
             rows.isEmpty() -> Text("No ${client.kind.id.uppercase()} content found. Install a pack, or link a folder.", Modifier.padding(12.dp))
         }
-        val notConnected = failures.any { it.needsConsent }
-        if (onConnectHub != null && notConnected)
-            OutlinedButton(onClick = onConnectHub, modifier = Modifier.padding(8.dp)) { Text("Connect Soundpack Manager") }
-        else if (setupHint != null && (notConnected || rows.isEmpty()))
-            Text(setupHint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
-        failures.filter { !it.needsConsent }.forEach {
+        failures.forEach {
             Text("${it.endpoint.authority}: ${it.error.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
         LazyColumn {
