@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Start from a service (a plugin UI) with FLAG_ACTIVITY_NEW_TASK; on Android 14+ the
+             host must bind that service with BIND_ALLOW_ACTIVITY_STARTS (docs/spikes.md, S5). -->
+        <activity
+            android:name="org.androidaudioplugin.soundpack.host.ui.SoundpackFoldersActivity"
+            android:exported="false"
+            android:label="Soundpack folders" />
+    </application>
+</manifest>

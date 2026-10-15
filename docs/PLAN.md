@@ -465,7 +465,8 @@ soundpack-provider-for-android/
   soundpack-testkit/            provider conformance tests runnable against any authority
   app/                          Soundpack Manager hub: host core + host UI + exported providers,
                                 consent, connected apps
-  samples/                      sample-sfz-pack (ported sample-sfz-provider), sample-sf2-pack, sample-jsfx-pack
+  samples/                      sample-sfz-pack (ported sample-sfz-provider), sample-sf2-pack, sample-jsfx-pack,
+                                embedded-client (embedded folder mode, Phase 2 gate tests)
   tools/                        make-sample-sf2.py (generates the sample SoundFonts)
   docs/
 ```
@@ -536,9 +537,10 @@ soundpack-provider-for-android/
   | contract | Kotlin stdlib only, so `uapmd-kmp` can later use it on desktop to parse identities. For now it is built as an Android library with no `android.*` imports |
   | provider-sdk | contract |
   | client | contract, kotlinx-coroutines (`Flow`); the native part needs only the NDK |
-  | host-core | client, provider-sdk (its folder providers extend `SoundpackProvider`) and the platform's SQLite; no Compose, no Room |
+  | host-core | provider-sdk (its folder providers extend `SoundpackProvider`) and the platform's SQLite; no client, no Compose, no Room, no coroutines |
+  | host-ui | host-core, Compose Material3, activity-compose, coroutines |
+  | ui-compose | client, Compose Material3, coroutines |
   | testkit | contract; used only from device tests |
-  | ui-compose, host-ui | Compose Material3; optional for apps |
 
 
 5. Migrating the consumers
@@ -627,6 +629,41 @@ Gate: with no hub installed, a test app that declares `LocalSfzFolderProvider` c
 The local provider passes the testkit. A folder with tens of thousands of files is rescanned
 once, not on every open.
 
+Status (2026-10-15): **gate passed** on the Galaxy Tab A11+ (Android 16). Built:
+
+- **`soundpack-host-core`** (no Compose, no Room, no coroutines):
+  - `FolderRegistry`, the UI-free host API: list, detect kinds, add, set kinds, remove,
+    rescan, observe, and `pickFolderIntent`;
+  - the platform-SQLite `FolderIndex`, and the SAF `FolderScanner` (bounded walk, dot-files
+    skipped, SF2 presets read at scan time, extensionless JSFX candidates confirmed by a
+    `desc:` line);
+  - the `FolderProvider` base with pipe-to-cache, and `Local{Sfz,Sf2,Jsfx}FolderProvider`,
+    which refuse to start if exported;
+  - `SoundpackFolderPickerActivity`, a plain activity that links in one step.
+- **`soundpack-host-ui`**: `SoundpackFoldersScreen` and `SoundpackFoldersActivity`, with the
+  D2 kind dialog (detected kinds pre-checked, a warning when nothing of the kind is found).
+- **`soundpack-ui-compose`**: `SoundpackPicker`, a tree of every readable pack, live.
+- **`samples/embedded-client`** declares local SFZ and SF2 providers. Its
+  `EmbeddedFoldersTest` drives the system picker with UiAutomator, and both tests pass:
+  - linking, kind detection, hidden-file exclusion, regular descriptors with known lengths,
+    conformance of both local authorities, SF2 presets, revision movement with the identity
+    still resolving, and the picker listing the folder;
+  - a 20,000-file folder linked in about 16 s (picker included), after which 200 opens and
+    10 catalog queries walk nothing; about 19 ms per open.
+
+The Compose screen was also checked by hand on the tablet: add through the system picker,
+the kind dialog, the folder card, the picker, then remove.
+
+Decisions made while building it:
+
+- **Live packs do not pin revisions.** A file request for a live (folder) pack is served
+  whatever revision it names, because a rescan must not break a client that is still
+  loading. Immutable packs still do. The base provider and the test kit implement this.
+- **Folders without entries are not packs.** A folder with no entries of a kind is not
+  listed as a pack of that kind; the folder UI shows it with a warning instead.
+- **The startup rescan skips folders already scanned in this process.**
+- **`soundpack.json` portable ids are not implemented yet** (§3.7).
+
 **Phase 3: hub app.**
 
 - The host core behind exported providers.
@@ -713,7 +750,9 @@ untouched.
 
   sfizz opens samples one at a time, so an instrument with N samples spends about N × 15 ms
   opening them. If that is too slow at VPO3 scale, add an "open many" call, or open in
-  parallel on the client side. Local providers inside the app avoid the extra hop entirely.
+  parallel on the client side. Local providers inside the app avoid the extra hop: measured
+  in Phase 2, an open through the in-app folder provider costs about 19 ms, of which about
+  11 ms is the SAF open itself.
 - **Live folders.** The bytes behind a folder pack can change under a mapping. The current
   advice stays: do not modify samples while they are in use, and reselect to reload.
 - **Grant limits.** Android caps the number of persisted URI grants per app (historically

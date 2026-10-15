@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 class ProviderConformance(private val context: Context, private val authority: String) {
     data class Result(val check: String, val passed: Boolean, val detail: String = "")
 
-    private class PackRow(val id: String, val revision: String, val fileCount: Int?)
+    private class PackRow(val id: String, val revision: String, val live: Boolean, val fileCount: Int?)
     private class FileRow(val path: String, val size: Long)
 
     private val results = mutableListOf<Result>()
@@ -107,7 +107,7 @@ class ProviderConformance(private val context: Context, private val authority: S
                     record("pack $id: source, live and label",
                         source in setOf(SoundpackContract.SOURCE_APK, SoundpackContract.SOURCE_FOLDER) && live in 0..1 && !label.isNullOrEmpty(),
                         "source=$source live=$live label=$label")
-                    rows += PackRow(id, revision, if (cursor.isNull(countColumn)) null else cursor.getInt(countColumn))
+                    rows += PackRow(id, revision, live == 1, if (cursor.isNull(countColumn)) null else cursor.getInt(countColumn))
                 }
             }
         }
@@ -203,9 +203,11 @@ class ProviderConformance(private val context: Context, private val authority: S
 
     private fun checkRejections(pack: PackRow, file: FileRow) {
         val name = "pack ${pack.id}"
-        refused("$name: refuses a stale revision") {
-            resolver.openAssetFileDescriptor(fileUri(pack, "conformance-not-a-revision", file.path), "r")!!.close()
-        }
+        // Live (folder) packs change in place, so only immutable packs pin a revision.
+        if (!pack.live)
+            refused("$name: refuses a stale revision") {
+                resolver.openAssetFileDescriptor(fileUri(pack, "conformance-not-a-revision", file.path), "r")!!.close()
+            }
         // Lexical ".." is fine while it stays inside the root...
         val withinRoot = "${file.path.substringBefore('/')}/../${file.path}"
         attempt("$name: accepts '$withinRoot' (stays inside the root)") {

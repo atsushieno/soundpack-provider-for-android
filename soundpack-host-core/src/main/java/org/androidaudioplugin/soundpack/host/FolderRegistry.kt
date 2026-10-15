@@ -1,0 +1,246 @@
+package org.androidaudioplugin.soundpack.host
+
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.DocumentsContract
+import android.util.Log
+import org.androidaudioplugin.soundpack.SoundpackContract
+import org.androidaudioplugin.soundpack.SoundpackKind
+import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+
+/** The UI-free host API (docs/PLAN.md §3.9): the folders this app has linked, for the kinds
+ * it serves through [FolderProvider]s. The hub and every embedding app use the same code; an
+ * app with its own UI toolkit (ImGui, JUCE) builds its folder panel on this.
+ *
+ * Methods that scan are blocking: call them off the main thread. */
+class FolderRegistry private constructor(context: Context) {
+    private val context: Context = context.applicationContext
+    private val index = FolderIndex.get(this.context)
+    private val scanner = FolderScanner(this.context.contentResolver)
+    private val scanLock = Any()
+    private val executor = Executors.newSingleThreadExecutor { Thread(it, "soundpack-folder-scan").apply { isDaemon = true } }
+    private val startupScanDone = AtomicBoolean(false)
+    /** Folders already walked in this process; the startup rescan skips them. */
+    private val scannedInProcess = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+    private val walks = AtomicInteger()
+
+    data class Folder(
+        /** The folder's pack id: `saf-<hash>`, derived from the folder itself (§3.7). */
+        val id: String,
+        val treeUri: Uri,
+        val displayName: String,
+        val kinds: Set<SoundpackKind>,
+        val revision: Long,
+        val scannedAt: Long,
+        /** Why the last scan failed (grant revoked, folder gone); null when it is available. */
+        val scanError: String?,
+        val fileCount: Int,
+        val totalBytes: Long,
+    ) {
+        val available: Boolean get() = scanError == null
+    }
+
+    /** How many times a folder has been walked in this process; for diagnostics and tests. */
+    val walkCount: Int get() = walks.get()
+
+    private val served: List<Pair<SoundpackKind, String>> by lazy {
+        @Suppress("DEPRECATION")
+        val providers = this.context.packageManager.getPackageInfo(this.context.packageName, PackageManager.GET_PROVIDERS).providers.orEmpty()
+        providers.mapNotNull { info ->
+            val authority = info.authority?.substringBefore(';') ?: return@mapNotNull null
+            val kind = SoundpackKind.BUILT_IN.firstOrNull { it.matchesAuthority(authority) } ?: return@mapNotNull null
+            val type = runCatching { Class.forName(info.name, false, this.context.classLoader) }.getOrNull()
+            if (type != null && FolderProvider::class.java.isAssignableFrom(type)) kind to authority else null
+        }
+    }
+
+    /** The kinds this app serves from linked folders: one per declared [FolderProvider]. */
+    fun servedKinds(): List<SoundpackKind> = served.map { it.first }.distinct()
+
+    fun folders(): List<Folder> = index.folders().map { it.toFolder() }
+
+    fun folder(id: String): Folder? = index.folder(id)?.toFolder()
+
+    /** How many entries [kind] has in the folder, as of its last scan. */
+    fun entryCount(id: String, kind: SoundpackKind): Int = index.entryStats(id, kind.id).first
+
+    /** Walks [tree] and counts the entries each served kind would find, so a UI can pre-check
+     * the kinds that have any (D2). Does not register anything. */
+    fun detectKinds(tree: Uri): Map<SoundpackKind, Int> {
+        val scan = scanner.scan(tree).also { walks.incrementAndGet() }
+        return servedKinds().associateWith { kind -> scan.files.count { scanner.isEntry(tree, kind, it) } }
+    }
+
+    /** Links [tree] for [kinds] and scans it. The app must hold a grant from the system folder
+     * picker; it is made persistent here. Adding a folder again adds kinds to it. */
+    fun add(tree: Uri, kinds: Set<SoundpackKind>): Folder {
+        require(DocumentsContract.isTreeUri(tree)) { "Not a folder (tree) URI: $tree" }
+        val served = servedKinds()
+        require(kinds.isNotEmpty() && served.containsAll(kinds)) { "This app serves $served from folders; asked for $kinds" }
+        context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val id = packIdFor(tree)
+        val existing = index.folder(id)
+        if (existing == null)
+            index.insertFolder(id, tree.toString(), scanner.displayName(tree), kinds.map { it.id })
+        else
+            index.setKinds(id, existing.kinds.toSet() + kinds.map { it.id })
+        scan(id)
+        notifyChanged()
+        return requireNotNull(folder(id))
+    }
+
+    /** Changes which kinds the folder is shared as, and rescans it. */
+    fun setKinds(id: String, kinds: Set<SoundpackKind>): Folder {
+        require(kinds.isNotEmpty() && servedKinds().containsAll(kinds)) { "Unsupported kinds $kinds" }
+        requireNotNull(index.folder(id)) { "No folder $id" }
+        index.setKinds(id, kinds.map { it.id })
+        scan(id)
+        notifyChanged()
+        return requireNotNull(folder(id))
+    }
+
+    /** Unlinks the folder and gives its grant back. Saved identities pointing into it become
+     * unavailable (or resolve through the hub, if the hub has the same folder). */
+    fun remove(id: String) {
+        // Wait for a running scan, so that it cannot write files into a removed folder.
+        val row = synchronized(scanLock) {
+            val row = index.folder(id) ?: return
+            index.deleteFolder(id)
+            row
+        }
+        runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(row.treeUri), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        notifyChanged()
+    }
+
+    /** Rescans one folder, or every folder. Returns the folders whose content changed. */
+    fun rescan(id: String? = null): List<Folder> {
+        val ids = if (id != null) listOf(id) else index.folders().map { it.id }
+        val changed = ids.filter { scan(it) }
+        notifyChanged()
+        return changed.mapNotNull { folder(it) }
+    }
+
+    fun rescanInBackground(id: String? = null) = executor.execute {
+        try {
+            rescan(id)
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Rescan failed: ${e.message}")
+        }
+    }
+
+    /** The first provider query in a process rescans every folder in the background ("when the
+     * host starts", §3.9); queries meanwhile answer from the existing index. */
+    internal fun ensureScannedOnce() {
+        if (startupScanDone.compareAndSet(false, true))
+            executor.execute {
+                index.folders().map { it.id }.filter { it !in scannedInProcess }.forEach {
+                    try {
+                        if (scan(it)) notifyChanged()
+                    } catch (e: Exception) {
+                        Log.w(LOG_TAG, "Startup rescan failed: ${e.message}")
+                    }
+                }
+            }
+    }
+
+    /** Blocks until scans queued in the background so far have finished; for tests and for
+     * callers that want fresh results right after linking. */
+    fun awaitBackgroundScans(timeoutMillis: Long = 60_000) {
+        executor.submit { }.get(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
+    /** Calls [listener] on the main thread whenever folders or their content change, in any
+     * process of this app. Close the result to stop. */
+    fun observe(listener: () -> Unit): AutoCloseable {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) = listener()
+        }
+        served.forEach { (_, authority) -> context.contentResolver.registerContentObserver(packsUri(authority), true, observer) }
+        return AutoCloseable { context.contentResolver.unregisterContentObserver(observer) }
+    }
+
+    /** An intent for [SoundpackFolderPickerActivity]: the system picker, then registration.
+     * Without [kinds], the kinds the folder has entries for are used. Starting it from a
+     * service (a plugin UI) needs FLAG_ACTIVITY_NEW_TASK, and the result is then lost; observe
+     * the registry instead. */
+    fun pickFolderIntent(kinds: Set<SoundpackKind>? = null, initialUri: Uri? = null): Intent =
+        Intent(context, SoundpackFolderPickerActivity::class.java).apply {
+            kinds?.let { putExtra(EXTRA_KINDS, it.map(SoundpackKind::id).toTypedArray()) }
+            initialUri?.let { putExtra(EXTRA_INITIAL_URI, it) }
+        }
+
+    /** Returns true when the folder's content or availability changed. */
+    private fun scan(id: String): Boolean = synchronized(scanLock) {
+        val row = index.folder(id) ?: return false
+        val tree = Uri.parse(row.treeUri)
+        val now = System.currentTimeMillis()
+        try {
+            val scan = scanner.scan(tree).also { walks.incrementAndGet() }
+            scannedInProcess += id
+            val kinds = row.kinds.mapNotNull { SoundpackKind.builtIn(it) }
+            val previousFiles = index.files(id).associateBy { it.path }
+            // The stored hash ends with the kinds that scan covered.
+            val previouslyScanned = index.contentHash(id)?.substringAfter('|', "")?.split(' ')?.toSet().orEmpty()
+            val entries = kinds.flatMap { kind ->
+                if (kind.id !in previouslyScanned)
+                    return@flatMap scanner.entries(tree, kind, scan.files)
+                val previous = index.entries(id, kind.id).associateBy { it.path }
+                // Unchanged files keep their entry decision and metadata (SF2 presets are not reread).
+                val (unchanged, changed) = scan.files.partition { file ->
+                    previousFiles[file.path]?.let { it.size == file.size && it.lastModified == file.lastModified } == true
+                }
+                unchanged.mapNotNull { previous[it.path] } + scanner.entries(tree, kind, changed)
+            }
+            val hash = scan.contentHash + "|" + row.kinds.sorted().joinToString(" ")
+            index.replaceContent(id, scan.displayName, scan.files, entries, hash, now) || row.scanError != null
+        } catch (e: Exception) {
+            Log.w(LOG_TAG, "Cannot scan ${row.displayName}: ${e.message}")
+            index.setScanError(id, e.message ?: e.javaClass.simpleName, now)
+            row.scanError == null
+        }
+    }
+
+    private fun notifyChanged() =
+        served.forEach { (_, authority) -> context.contentResolver.notifyChange(packsUri(authority), null) }
+
+    private fun packsUri(authority: String) =
+        Uri.Builder().scheme("content").authority(authority).appendPath(SoundpackContract.PATH_PACKS).build()
+
+    private fun FolderIndex.FolderRow.toFolder() = Folder(id, Uri.parse(treeUri), displayName,
+        kinds.mapNotNull { SoundpackKind.builtIn(it) }.toSet(), revision, scannedAt, scanError, fileCount, totalBytes)
+
+    companion object {
+        const val EXTRA_KINDS = "org.androidaudioplugin.soundpack.host.extra.KINDS"
+        const val EXTRA_INITIAL_URI = "org.androidaudioplugin.soundpack.host.extra.INITIAL_URI"
+        /** In the picker's result: the registered folder's id. */
+        const val EXTRA_FOLDER_ID = "org.androidaudioplugin.soundpack.host.extra.FOLDER_ID"
+        /** In the picker's result: a Bundle of kind id -> entry count, so the caller can warn
+         * when the folder has none for its kind ("No .sfz files found", D2). */
+        const val EXTRA_ENTRY_COUNTS = "org.androidaudioplugin.soundpack.host.extra.ENTRY_COUNTS"
+        const val EXTRA_ERROR = "org.androidaudioplugin.soundpack.host.extra.ERROR"
+
+        private const val LOG_TAG = "SoundpackHost"
+
+        @Volatile
+        private var instance: FolderRegistry? = null
+
+        fun get(context: Context): FolderRegistry =
+            instance ?: synchronized(this) { instance ?: FolderRegistry(context).also { instance = it } }
+
+        /** `saf-<hash of provider authority and tree document id>`: the same folder gets the
+         * same id in every app and in the hub, so it can move between them (§3.7). */
+        fun packIdFor(tree: Uri): String {
+            val key = "${tree.authority}\n${DocumentsContract.getTreeDocumentId(tree)}"
+            val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())
+            return "saf-" + digest.take(16).joinToString("") { "%02x".format(it) }
+        }
+    }
+}

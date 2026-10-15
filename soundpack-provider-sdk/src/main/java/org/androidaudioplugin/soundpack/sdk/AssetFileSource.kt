@@ -1,6 +1,7 @@
 package org.androidaudioplugin.soundpack.sdk
 
 import android.content.res.AssetFileDescriptor
+import android.system.Os
 import org.androidaudioplugin.soundpack.RandomAccessSource
 import java.io.EOFException
 import java.io.FileInputStream
@@ -10,7 +11,9 @@ import java.nio.ByteBuffer
 class AssetFileSource(private val afd: AssetFileDescriptor) : RandomAccessSource, AutoCloseable {
     private val channel = FileInputStream(afd.fileDescriptor).channel
 
-    override val size: Long get() = afd.declaredLength
+    /** SAF documents report an unknown length (−1); then the file's own size counts. */
+    override val size: Long =
+        if (afd.declaredLength >= 0) afd.declaredLength else Os.fstat(afd.fileDescriptor).st_size - afd.startOffset
 
     override fun readFully(position: Long, buffer: ByteArray) {
         if (position < 0 || position + buffer.size > size)

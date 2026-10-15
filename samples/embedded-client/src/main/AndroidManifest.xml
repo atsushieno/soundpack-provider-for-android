@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="Soundpack Embedded Sample">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Embedded mode: this app's own linked folders, for the kinds it uses. Not exported:
+             the user granted these folders to this app alone. -->
+        <provider
+            android:name="org.androidaudioplugin.soundpack.host.LocalSfzFolderProvider"
+            android:authorities="${applicationId}.soundpack.local.sfz"
+            android:exported="false" />
+        <provider
+            android:name="org.androidaudioplugin.soundpack.host.LocalSf2FolderProvider"
+            android:authorities="${applicationId}.soundpack.local.sf2"
+            android:exported="false" />
+    </application>
+</manifest>

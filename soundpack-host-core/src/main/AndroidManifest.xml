@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Runs the system folder picker and registers the result; shows nothing itself.
+             Start it with FolderRegistry.pickFolderIntent(). -->
+        <activity
+            android:name="org.androidaudioplugin.soundpack.host.SoundpackFolderPickerActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    </application>
+</manifest>

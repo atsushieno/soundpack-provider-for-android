@@ -17,9 +17,11 @@ rootProject.name = "soundpack-provider-for-android"
 
 // Libraries (docs/PLAN.md §4).
 include(":soundpack-contract", ":soundpack-provider-sdk", ":soundpack-client", ":soundpack-testkit")
+include(":soundpack-host-core", ":soundpack-host-ui", ":soundpack-ui-compose")
 
 // Sample pack APKs, one per built-in kind.
 include(":samples:sample-sfz-pack", ":samples:sample-sf2-pack", ":samples:sample-jsfx-pack")
+include(":samples:embedded-client")
 
 // Phase 0 platform spikes (docs/spikes.md). Throwaway: delete them once the contract is
 // written down.

@@ -22,7 +22,7 @@ import java.io.FileNotFoundException
  * Subclasses list packs, entries and files, and open files. This class implements the URI
  * layout and enforces the rules every provider must follow:
  * - paths are normalized, and dot-files are neither listed nor served;
- * - a file request must name the pack's current revision;
+ * - a file request must name an immutable pack's current revision;
  * - [SoundpackKind.ReadScope.ENTRIES_ONLY] kinds serve only their entry files;
  * - every descriptor handed out is a regular file with a known length;
  * - nothing is writable. */
@@ -76,7 +76,8 @@ abstract class SoundpackProvider(val kind: SoundpackKind) : ContentProvider() {
         context?.contentResolver?.notifyChange(uri, null)
     }
 
-    private fun pack(packId: String) = packs().firstOrNull { it.id == packId }
+    /** Looks up one pack; override when listing every pack is expensive. */
+    protected open fun pack(packId: String): PackRecord? = packs().firstOrNull { it.id == packId }
 
     private fun visibleFiles(pack: PackRecord): List<FileRecord> {
         val files = files(pack).filter { !PackPath.isHidden(it.path) }
@@ -121,7 +122,9 @@ abstract class SoundpackProvider(val kind: SoundpackKind) : ContentProvider() {
         val route = SoundpackContract.route(uri.pathSegments) as? Route.File
             ?: throw FileNotFoundException("Not a file URI: $uri")
         val pack = pack(route.packId) ?: throw FileNotFoundException("No pack ${route.packId}")
-        if (pack.revision != route.revision)
+        // Immutable packs pin their bytes to a revision. A live (folder) pack changes in place,
+        // and a rescan bumping its revision must not break clients that are still loading.
+        if (!pack.live && pack.revision != route.revision)
             throw FileNotFoundException("Pack ${pack.id} is at revision ${pack.revision}, not ${route.revision}")
         val path = PackPath.normalize(route.path)
             ?: throw FileNotFoundException("Invalid path: ${route.path}")

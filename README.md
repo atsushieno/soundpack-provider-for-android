@@ -4,9 +4,15 @@ A Soundpack Manager app and libraries that give Android audio apps uniform, read
 access to sound content outside the app: SFZ, SF2 and JSFX packs published by other apps,
 and folders the user put on the device.
 
-Status: Phase 0 (platform spikes) is done. Phase 1 is in progress: the contract, provider
-SDK, client and test kit exist and pass on devices, but the existing pack apps are not ported
-yet. There is no Soundpack Manager app yet.
+Status:
+
+- **Phase 0** (platform spikes): done.
+- **Phase 1** (contract, provider SDK, client, test kit): done and passing on devices,
+  except that the existing pack apps are not ported yet.
+- **Phase 2** (host core, embedded folder mode): its gate passes, so apps can link their own
+  folders.
+
+There is no Soundpack Manager app yet.
 
 - [docs/PLAN.md](docs/PLAN.md): survey of the existing implementations, the architecture,
   the decisions taken, and the phases with their status.
@@ -20,7 +26,10 @@ yet. There is no Soundpack Manager app yet.
 | `soundpack-provider-sdk` | `SoundpackProvider` base class, and `AssetPackProvider` for packs shipped as APK assets (`SfzAssetPackProvider`, `Sf2AssetPackProvider`, `JsfxAssetPackProvider`). |
 | `soundpack-client` | `SoundpackClient`: discovery, catalog (and a live `Flow`), opening saved identities, `materialize` for path-only engines. |
 | `soundpack-testkit` | `ProviderConformance`, to check any provider from a device test. |
-| `samples/` | One small pack APK per kind. |
+| `soundpack-host-core` | Linked folders without any UI toolkit: `FolderRegistry`, the folder index, `Local{Sfz,Sf2,Jsfx}FolderProvider`, and a picker activity that links in one step. |
+| `soundpack-host-ui` | Optional Compose folder management: `SoundpackFoldersScreen` / `SoundpackFoldersActivity`. |
+| `soundpack-ui-compose` | `SoundpackPicker`: every readable pack's entries as a tree. |
+| `samples/` | One small pack APK per kind, and `embedded-client`, an app with its own folders. |
 | `spikes/` | Phase 0 throwaway APKs. |
 
 ## Build and test
@@ -38,6 +47,37 @@ The device tests read the sample packs through Binder, so install those first:
 ```sh
 ./gradlew :soundpack-client:connectedDebugAndroidTest
 ```
+
+The embedded-folder tests drive the system folder picker (in English) and create a
+20,000-file fixture in `/sdcard/Music/SoundpackLargeTest`. The fixture is kept between runs,
+because creating it takes minutes:
+
+```sh
+./gradlew :samples:embedded-client:connectedDebugAndroidTest
+```
+
+```sh
+adb shell rm -rf /sdcard/Music/SoundpackLargeTest
+```
+
+## Letting users link their own folders
+
+Depend on `soundpack-host-core` (and `soundpack-host-ui` for the Compose screen). Declare a
+private provider for each kind you use; it must not be exported:
+
+```xml
+<provider
+    android:name="org.androidaudioplugin.soundpack.host.LocalSfzFolderProvider"
+    android:authorities="${applicationId}.soundpack.local.sfz"
+    android:exported="false" />
+```
+
+`SoundpackClient` then finds these folders next to installed packs. To add folders, use one
+of:
+
+- `FolderRegistry.pickFolderIntent()`, which picks and links in one step without Compose;
+- `SoundpackFoldersActivity`, the Compose folder screen;
+- `FolderRegistry` directly, from your own UI.
 
 ## Publishing a pack
 
