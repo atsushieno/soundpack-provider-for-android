@@ -1,0 +1,5 @@
+desc:Soundpack sample DSP helpers (import only)
+//author: soundpack-provider-for-android samples (CC0)
+
+@init
+function db_to_gain(db) ( 10 ^ (db / 20); );

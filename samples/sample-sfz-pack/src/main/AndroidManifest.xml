@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- No activity: this app only publishes a pack. -->
+    <application android:label="Soundpack Sample SFZ">
+        <provider
+            android:name="org.androidaudioplugin.soundpack.sdk.SfzAssetPackProvider"
+            android:authorities="${applicationId}.soundpack.sfz"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.sfz.V1" />
+            </intent-filter>
+            <meta-data
+                android:name="org.androidaudioplugin.soundpack#Packs"
+                android:resource="@xml/soundpack_sfz" />
+        </provider>
+    </application>
+</manifest>

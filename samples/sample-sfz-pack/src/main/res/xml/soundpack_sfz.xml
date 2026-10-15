@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- main.sfz includes parts/region.sfz, which points at ../samples/ with default_path. Only
+     main.sfz is an entry; the include and the sample are pack resources. -->
+<packs>
+    <pack
+        id="org.androidaudioplugin.soundpack.sample.sine"
+        label="Sample Sine (SFZ)"
+        revision="1"
+        assetRoot="pack"
+        summary="One instrument with a nested #include and a WAV sample."
+        license="MIT">
+        <entry path="instruments/main.sfz" label="Sine (include + sample)" group="Examples" scopes="instruments samples" />
+    </pack>
+</packs>

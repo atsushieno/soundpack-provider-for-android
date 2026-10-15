@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- No activity: this app only publishes a pack. -->
+    <application android:label="Soundpack Sample SF2">
+        <provider
+            android:name="org.androidaudioplugin.soundpack.sdk.Sf2AssetPackProvider"
+            android:authorities="${applicationId}.soundpack.sf2"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.sf2.V1" />
+            </intent-filter>
+            <meta-data
+                android:name="org.androidaudioplugin.soundpack#Packs"
+                android:resource="@xml/soundpack_sf2" />
+        </provider>
+    </application>
+</manifest>

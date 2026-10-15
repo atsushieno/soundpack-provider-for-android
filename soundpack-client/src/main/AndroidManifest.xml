@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Merged into every consumer, so it can discover pack providers of the built-in kinds
+         (S1: <queries><intent> covers provider intent-filters). -->
+    <queries>
+        <intent>
+            <action android:name="org.androidaudioplugin.soundpack.sfz.V1" />
+        </intent>
+        <intent>
+            <action android:name="org.androidaudioplugin.soundpack.sf2.V1" />
+        </intent>
+        <intent>
+            <action android:name="org.androidaudioplugin.soundpack.jsfx.V1" />
+        </intent>
+    </queries>
+</manifest>

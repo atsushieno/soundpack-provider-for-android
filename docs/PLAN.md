@@ -13,8 +13,8 @@ Drafted 2026-10-15 from these checkouts:
 
 This document is the plan. The platform behaviours it marked **[spike]** were checked by the
 Phase 0 spikes on a Samsung Galaxy Tab A11+ running Android 16 (2026-10-15). Each marker
-now states its result; details are in `docs/spikes.md`. An x86_64 emulator run is still
-outstanding.
+now states its result; details are in `docs/spikes.md`. The same results were reproduced on an
+Android 15 emulator (arm64; this Mac cannot run x86_64 images).
 
 
 1. Goal
@@ -454,7 +454,8 @@ same code; only the provider's exposure differs.
 soundpack-provider-for-android/
   gradle/libs.versions.toml     aligned with AAP (compileSdk 37, minSdk 29, AGP 9.3, Kotlin 2.2)
   soundpack-contract/           kinds, URIs, columns, identity parser, path normaliser, SF2 PHDR reader
-  soundpack-provider-sdk/       AssetPackProvider + res/xml metadata parser
+  soundpack-provider-sdk/       SoundpackProvider base (URI layout, rules) + AssetPackProvider
+                                and its res/xml metadata parser
   soundpack-client/             Kotlin client + prefab native module (C ABI, JNI, mmap helper)
   soundpack-ui-compose/         SoundpackPicker (generalised SfzTree), access/connect affordances
   soundpack-host-core/          folder sources, SAF walker, pipe→cache, index DB, kind indexers,
@@ -465,6 +466,7 @@ soundpack-provider-for-android/
   app/                          Soundpack Manager hub: host core + host UI + exported providers,
                                 consent, connected apps
   samples/                      sample-sfz-pack (ported sample-sfz-provider), sample-sf2-pack, sample-jsfx-pack
+  tools/                        make-sample-sf2.py (generates the sample SoundFonts)
   docs/
 ```
 
@@ -531,10 +533,11 @@ soundpack-provider-for-android/
 
   | Module | May depend on |
   | --- | --- |
-  | contract | Kotlin stdlib only, so `uapmd-kmp` can later use it on desktop to parse identities |
+  | contract | Kotlin stdlib only, so `uapmd-kmp` can later use it on desktop to parse identities. For now it is built as an Android library with no `android.*` imports |
   | provider-sdk | contract |
   | client | contract, kotlinx-coroutines (`Flow`); the native part needs only the NDK |
-  | host-core | client and the platform's SQLite; no Compose, no Room |
+  | host-core | client, provider-sdk (its folder providers extend `SoundpackProvider`) and the platform's SQLite; no Compose, no Room |
+  | testkit | contract; used only from device tests |
   | ui-compose, host-ui | Compose Material3; optional for apps |
 
 
@@ -554,7 +557,7 @@ soundpack-provider-for-android/
 -------------------
 
 **Phase 0: platform spikes.** Throwaway APKs, run on API 30+ devices: one physical arm64
-device and one x86_64 emulator. They are in `spikes/`, with the runbook and results table in
+device and one emulator. They are in `spikes/`, with the runbook and results table in
 `docs/spikes.md`.
 
 - S1: `<queries><intent>` plus `queryIntentContentProviders` sees a third-party provider's
@@ -576,6 +579,10 @@ device and one x86_64 emulator. They are in `spikes/`, with the runbook and resu
 Gate: each spike either passes, or its fallback (§3.6, §3.8, §3.9) is chosen and written
 into the contract.
 
+Status: **done** (2026-10-15) on a Galaxy Tab A11+ (Android 16) and an Android 15
+emulator. Every spike passes except S5, which needs aap-core to bind plugin UIs with
+`BIND_ALLOW_ACTIVITY_STARTS` (§8). That change is outside this repository and not yet made.
+
 **Phase 1: contract, provider SDK, client, samples.**
 
 - Kotlin client: discovery, catalog Flow, PackSession, materialize.
@@ -586,6 +593,24 @@ into the contract.
 Gate: conformance passes for all sample packs and for vpo3. A test client opens the
 include and sample of `sample-sfz-pack` across APKs, and enumerates VPO3 in a single cursor
 query.
+
+Status (2026-10-15): **in progress.** Done in this repository:
+
+- `soundpack-contract`, with 17 JVM unit tests: kinds, routes, identities, path rules, globs
+  and the SF2 preset reader.
+- `soundpack-provider-sdk`: the `SoundpackProvider` base enforces the read-only rules,
+  revision checks, read scopes, dot-file hiding and known lengths. `AssetPackProvider` adds
+  XML or code declarations, glob entries, and SF2 preset metadata.
+- `soundpack-client`: discovery, `catalog()` and `catalogFlow()`, identities with revision
+  policies, `PackSession`, `Materializer`, and `Sf2Metadata`.
+- `soundpack-testkit`: `ProviderConformance`.
+- The three sample packs.
+- `SamplePacksTest` (6 device tests) passes on both test devices. It covers conformance for
+  every sample provider, the SFZ include and sample opened across APKs, SF2 presets from
+  metadata, incremental materialize, the revision policies, and the catalog flow.
+
+Not done: porting vpo3 and salamander (their own repositories), and therefore the VPO3 part
+of the gate.
 
 **Phase 2: host core and embedded mode.** No hub yet.
 

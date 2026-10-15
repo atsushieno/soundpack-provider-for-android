@@ -1,0 +1,17 @@
+desc:Soundpack Sample Gain
+//tags: utility
+//author: soundpack-provider-for-android samples (CC0)
+
+slider1:0<-60,12,0.1>Gain (dB)
+
+import sample-dsp.jsfx-inc
+
+@init
+gain = db_to_gain(slider1);
+
+@slider
+gain = db_to_gain(slider1);
+
+@sample
+spl0 *= gain;
+spl1 *= gain;

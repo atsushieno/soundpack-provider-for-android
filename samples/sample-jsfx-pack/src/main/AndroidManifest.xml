@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- No activity: this app only publishes a pack. -->
+    <application android:label="Soundpack Sample JSFX">
+        <provider
+            android:name="org.androidaudioplugin.soundpack.sdk.JsfxAssetPackProvider"
+            android:authorities="${applicationId}.soundpack.jsfx"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.jsfx.V1" />
+            </intent-filter>
+            <meta-data
+                android:name="org.androidaudioplugin.soundpack#Packs"
+                android:resource="@xml/soundpack_jsfx" />
+        </provider>
+    </application>
+</manifest>

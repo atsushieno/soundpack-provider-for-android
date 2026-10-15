@@ -1,0 +1,16 @@
+desc:Soundpack Sample Tremolo
+//tags: modulation
+//author: soundpack-provider-for-android samples (CC0)
+
+slider1:4<0.1,20,0.1>Rate (Hz)
+slider2:50<0,100,1>Depth (%)
+
+@init
+phase = 0;
+
+@sample
+phase += 2 * $pi * slider1 / srate;
+phase >= 2 * $pi ? phase -= 2 * $pi;
+g = 1 - slider2 / 100 * (0.5 - 0.5 * cos(phase));
+spl0 *= g;
+spl1 *= g;

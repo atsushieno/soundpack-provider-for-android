@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No <entry> elements: the .jsfx files are the entry candidates; sample-dsp.jsfx-inc is an
+     import, served as a pack file. -->
+<packs>
+    <pack
+        id="org.androidaudioplugin.soundpack.sample.effects"
+        label="Sample Effects (JSFX)"
+        revision="1"
+        assetRoot="jsfx"
+        summary="A gain and a tremolo effect; the gain imports a shared .jsfx-inc."
+        license="CC0-1.0" />
+</packs>
