@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- S1 negative control. The client does not declare this action in <queries>, so
+         queryIntentContentProviders() must not return this provider. If it does, the S1
+         positive result proves nothing. -->
+    <application android:label="Spike Invisible">
+        <provider
+            android:name=".InvisibleProvider"
+            android:authorities="${applicationId}.soundpack.sfz"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.spike.hidden.V1" />
+            </intent-filter>
+        </provider>
+    </application>
+</manifest>

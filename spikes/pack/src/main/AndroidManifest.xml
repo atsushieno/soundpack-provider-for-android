@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Only for S5, where this app plays the AAP host and binds the client's view service.
+         It does not affect S1, which is about the client seeing this app. -->
+    <queries>
+        <package android:name="org.androidaudioplugin.soundpack.spike.client" />
+    </queries>
+
+    <application android:label="Spike Pack">
+        <activity
+            android:name=".EmbedHostActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- S1 (positive case) and S3: a public pack provider, found only through its
+             intent-filter. This app has no other component the client could match. -->
+        <provider
+            android:name=".PackProvider"
+            android:authorities="${applicationId}.soundpack.sfz"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.spike.sfz.V1" />
+            </intent-filter>
+        </provider>
+    </application>
+</manifest>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <queries>
+        <!-- S1 under test: does this make providers with this intent-filter visible? -->
+        <intent>
+            <action android:name="org.androidaudioplugin.soundpack.spike.sfz.V1" />
+        </intent>
+        <!-- Makes the hub visible through its consent activity, independently of S1. -->
+        <intent>
+            <action android:name="org.androidaudioplugin.soundpack.spike.CONNECT" />
+        </intent>
+    </queries>
+
+    <application android:label="Spike Client">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- S5: plays SfzFoldersActivity / SoundpackFoldersActivity, started from the
+             service-hosted UI. -->
+        <activity
+            android:name=".TrampolineActivity"
+            android:exported="false" />
+
+        <!-- S2d: a second process of the same app, like a plugin service process. -->
+        <service
+            android:name=".PluginProcessService"
+            android:exported="false"
+            android:process=":plugin" />
+
+        <!-- S5: plays AAP's AudioPluginViewService. Bound by the Spike Pack app as host. -->
+        <service
+            android:name=".SpikeViewService"
+            android:exported="true" />
+    </application>
+</manifest>

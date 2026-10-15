@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Nobody holds this but the hub itself: the client must NOT request it. (The spike APKs
+         share the debug key, so a client that requested it would get it.) Access comes only
+         from the URI grant made by ConnectActivity. -->
+    <permission
+        android:name="org.androidaudioplugin.soundpack.spike.hub.permission.READ"
+        android:protectionLevel="signature" />
+
+    <application android:label="Spike Hub">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- S2: consent. Returns content://<auth>/ with READ | PERSISTABLE | PREFIX. -->
+        <activity
+            android:name=".ConnectActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.spike.CONNECT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- S6: receives a SAF tree grant delegated by another app and tries to persist it.
+             Started by explicit component. -->
+        <activity
+            android:name=".ShareFolderActivity"
+            android:exported="true" />
+
+        <!-- S2/S4: the consent-gated provider. Exported so it can be discovered, but guarded by
+             the signature permission; grantUriPermissions lets ConnectActivity hand out grants. -->
+        <provider
+            android:name=".HubProvider"
+            android:authorities="${applicationId}.soundpack.sfz"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="org.androidaudioplugin.soundpack.spike.hub.permission.READ">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.spike.sfz.V1" />
+            </intent-filter>
+        </provider>
+    </application>
+</manifest>
