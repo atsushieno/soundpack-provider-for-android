@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
@@ -54,7 +56,8 @@ fun SoundpackFoldersScreen(
     onDone: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
-    val served = remember { registry.servedKinds() }
+    // Resource types can change while the screen is shown (the Soundpack Manager's Types tab).
+    var served by remember { mutableStateOf(registry.servedKinds()) }
     var kind by remember { mutableStateOf(initialKind?.takeIf { it in served } ?: served.firstOrNull()) }
     var revision by remember { mutableIntStateOf(0) }
     var folders by remember { mutableStateOf(emptyList<FolderRegistry.Folder>()) }
@@ -70,6 +73,9 @@ fun SoundpackFoldersScreen(
         onDispose { observation.close() }
     }
     LaunchedEffect(revision) {
+        served = withContext(Dispatchers.IO) { registry.servedKinds() }
+        // The same type with its current label and description, or the first one if it is gone.
+        kind = served.firstOrNull { it == kind } ?: served.firstOrNull()
         val (list, entryCounts) = withContext(Dispatchers.IO) {
             registry.folders().let { list -> list to list.associate { folder -> folder.id to folder.kinds.associateWith { registry.entryCount(folder.id, it) } } }
         }
@@ -100,7 +106,7 @@ fun SoundpackFoldersScreen(
         work(if (import) IMPORTING else "Scanning…") {
             val folder = withContext(Dispatchers.IO) { registry.add(tree, setOf(chosen), import) }
             if (withContext(Dispatchers.IO) { registry.entryCount(folder.id, chosen) } == 0)
-                message = "${folder.displayName} has no ${chosen.id.uppercase()} files. Check that you picked the right folder."
+                message = "${folder.displayName} has no ${chosen.label} files. Check that you picked the right folder."
         }
     }
 
@@ -108,15 +114,17 @@ fun SoundpackFoldersScreen(
         Column(Modifier.safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Folders", style = MaterialTheme.typography.headlineSmall)
             if (served.size > 1)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    served.forEach { FilterChip(selected = kind == it, onClick = { kind = it }, enabled = busy == null, label = { Text(it.id.uppercase()) }) }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    served.forEach { FilterChip(selected = kind == it, onClick = { kind = it }, enabled = busy == null, label = { Text(it.label) }) }
                 }
             val current = kind ?: return@Column
-            val label = current.id.uppercase()
-            Text("Add a folder of $label content that you put on this device (adb push, USB, a file manager); " +
+            val label = current.label
+            if (current.description.isNotEmpty())
+                Text(current.description, style = MaterialTheme.typography.bodyMedium)
+            Text("Add a folder that you put on this device (adb push, USB, a file manager); " +
                 "subfolders are included. Import copies it into this app: it loads as fast as an installed pack and keeps " +
                 "working without the folder, but takes storage. In place uses the folder where it is, with no copy, and " +
-                "loads slower. Android cannot use the root of storage or of Download: pick a folder of its own, such as Music/SFZ.",
+                "loads slower. Android cannot use the root of storage or of Download: pick a folder of its own.",
                 style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(onClick = { importing = true; picker.launch(null) }, enabled = busy == null) { Text("Import a folder") }
@@ -165,7 +173,7 @@ private fun FolderCard(
             Text(folder.displayName, style = MaterialTheme.typography.titleMedium)
             Text(DocumentsContract.getTreeDocumentId(folder.treeUri), style = MaterialTheme.typography.bodySmall)
             Text(if (folder.available)
-                "$count ${kind.id.uppercase()} · ${folder.fileCount} files · " + if (folder.imported) "imported" else "in place"
+                "$count ${kind.label} · ${folder.fileCount} files · " + if (folder.imported) "imported" else "in place"
             else "Not available: ${folder.scanError}. Add it again.",
                 color = if (folder.available) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall)
@@ -173,7 +181,7 @@ private fun FolderCard(
                 Text("The folder cannot be read (${folder.scanError}); its imported copy is used.", style = MaterialTheme.typography.bodySmall)
             folder.importError?.let { Text("$it. Those files are read from the folder.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             if (folder.available && count == 0)
-                Text("No ${kind.id.uppercase()} files here; check that you picked the right folder.", style = MaterialTheme.typography.bodySmall)
+                Text("No ${kind.label} files here; check that you picked the right folder.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onRescan, enabled = enabled) { Text("Rescan") }
                 TextButton(onClick = onRemove, enabled = enabled) { Text("Remove") }
@@ -193,7 +201,7 @@ class SoundpackFoldersActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val registry = FolderRegistry.get(this)
-        val kind = intent.getStringArrayExtra(FolderRegistry.EXTRA_KINDS)?.firstNotNullOfOrNull { SoundpackKind.builtIn(it) }
+        val kind = intent.getStringArrayExtra(FolderRegistry.EXTRA_KINDS)?.firstNotNullOfOrNull { registry.kind(it) }
         setContent {
             MaterialTheme {
                 SoundpackFoldersScreen(registry, initialKind = kind, onDone = { finish() })

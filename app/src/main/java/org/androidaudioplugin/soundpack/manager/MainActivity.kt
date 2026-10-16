@@ -3,6 +3,7 @@ package org.androidaudioplugin.soundpack.manager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -33,8 +35,8 @@ import org.androidaudioplugin.soundpack.host.FolderRegistry
 import org.androidaudioplugin.soundpack.host.ui.SoundpackFoldersScreen
 import org.androidaudioplugin.soundpack.ui.SoundpackPicker
 
-/** The Soundpack Manager: folders shared with every soundpack app, and a browser over
- * everything installed. */
+/** The Soundpack Manager: folders shared with every soundpack app, a browser over everything
+ * installed, and the resource types folders are linked as. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +48,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val tabs = listOf("Folders", "Browse")
+private val tabs = listOf("Folders", "Browse", "Types")
 
 @Composable
 private fun HubScreen() {
@@ -56,25 +58,28 @@ private fun HubScreen() {
         PrimaryTabRow(selectedTabIndex = tab) {
             tabs.forEachIndexed { index, title -> Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) }) }
         }
+        val registry = remember { FolderRegistry.get(context) }
         when (tab) {
-            0 -> SoundpackFoldersScreen(remember { FolderRegistry.get(context) })
-            else -> BrowseTab()
+            0 -> SoundpackFoldersScreen(registry)
+            1 -> BrowseTab(registry)
+            else -> TypesScreen(registry)
         }
     }
 }
 
 @Composable
-private fun BrowseTab() {
+private fun BrowseTab(registry: FolderRegistry) {
     val context = LocalContext.current
-    var kind by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.Saver<SoundpackKind, String>({ it.id }, { SoundpackKind.builtIn(it) })) {
-        mutableStateOf(SoundpackKind.SFZ)
+    val kinds = remember { registry.servedKinds() }
+    var kind by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.Saver<SoundpackKind, String>({ it.id }, { registry.kind(it) })) {
+        mutableStateOf(kinds.first())
     }
     val client = remember(kind) { SoundpackClient(context, kind) }
     var selected by remember(kind) { mutableStateOf<SoundpackIdentity?>(null) }
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Everything installed or shared here, as apps see it.", style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SoundpackKind.BUILT_IN.forEach { FilterChip(selected = kind == it, onClick = { kind = it }, label = { Text(it.id.uppercase()) }) }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            kinds.forEach { FilterChip(selected = kind == it, onClick = { kind = it }, label = { Text(it.label) }) }
         }
         SoundpackPicker(client, selected, onSelect = { selected = client.identityOf(it) }, Modifier.weight(1f).fillMaxWidth())
         selected?.let { Text(it.format(), style = MaterialTheme.typography.bodySmall) }

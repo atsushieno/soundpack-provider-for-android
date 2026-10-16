@@ -27,6 +27,8 @@ class FolderRegistry private constructor(context: Context) {
     private val index = FolderIndex.get(this.context)
     private val scanner = FolderScanner(this.context.contentResolver)
     private val imports = FolderImports(this.context)
+    /** The resource types, as this app's user edited them. */
+    val types = ResourceTypes.get(this.context)
     private val scanLock = Any()
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "soundpack-folder-scan").apply { isDaemon = true } }
     private val startupScanDone = AtomicBoolean(false)
@@ -60,19 +62,50 @@ class FolderRegistry private constructor(context: Context) {
     /** How many times a folder has been walked in this process; for diagnostics and tests. */
     val walkCount: Int get() = walks.get()
 
+    /** The built-in kinds this app declares a [FolderProvider] for, with its authority. */
     private val served: List<Pair<SoundpackKind, String>> by lazy {
-        @Suppress("DEPRECATION")
-        val providers = this.context.packageManager.getPackageInfo(this.context.packageName, PackageManager.GET_PROVIDERS).providers.orEmpty()
-        providers.mapNotNull { info ->
-            val authority = info.authority?.substringBefore(';') ?: return@mapNotNull null
+        declaredProviders().mapNotNull { (authority, type) ->
             val kind = SoundpackKind.BUILT_IN.firstOrNull { it.matchesAuthority(authority) } ?: return@mapNotNull null
-            val type = runCatching { Class.forName(info.name, false, this.context.classLoader) }.getOrNull()
-            if (type != null && FolderProvider::class.java.isAssignableFrom(type)) kind to authority else null
+            if (FolderProvider::class.java.isAssignableFrom(type)) kind to authority else null
         }
     }
 
-    /** The kinds this app serves from linked folders: one per declared [FolderProvider]. */
-    fun servedKinds(): List<SoundpackKind> = served.map { it.first }.distinct()
+    /** The authority of this app's [TypesFolderProvider], which serves the types users added. */
+    private val typesAuthority: String? by lazy {
+        declaredProviders().firstOrNull { (authority, type) ->
+            SoundpackContract.Types.matchesAuthority(authority) && TypesFolderProvider::class.java.isAssignableFrom(type)
+        }?.first
+    }
+
+    private fun declaredProviders(): List<Pair<String, Class<*>>> {
+        @Suppress("DEPRECATION")
+        val providers = context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PROVIDERS).providers.orEmpty()
+        return providers.mapNotNull { info ->
+            val authority = info.authority?.substringBefore(';') ?: return@mapNotNull null
+            runCatching { Class.forName(info.name, false, context.classLoader) }.getOrNull()?.let { authority to it }
+        }
+    }
+
+    /** The kinds this app serves from linked folders, as its user sees them ([types]): one per
+     * declared [FolderProvider], and with a [TypesFolderProvider], every type the user added. */
+    fun servedKinds(): List<SoundpackKind> =
+        served.map { types.kind(it.first.id) ?: it.first }.distinct() + if (typesAuthority != null) types.added() else emptyList()
+
+    /** A kind this app serves, by id; null for any other. */
+    fun kind(id: String): SoundpackKind? = servedKinds().firstOrNull { it.id == id }
+
+    /** After a type changed: folders linked as it are scanned again, since its file types decide
+     * the entries. Blocking; call it off the main thread. */
+    fun typeChanged(id: String) {
+        rescan(index.folders().filter { id in it.kinds }.map { it.id })
+    }
+
+    /** Removes an added type, and stops using every folder as it. */
+    fun removeType(id: String) {
+        index.folders().filter { id in it.kinds }.forEach { removeKind(it.id, types.kind(id) ?: SoundpackKind.forId(id)) }
+        types.remove(id)
+        notifyChanged()
+    }
 
     fun folders(): List<Folder> = index.folders().map { it.toFolder() }
 
@@ -118,7 +151,7 @@ class FolderRegistry private constructor(context: Context) {
     /** Stops using the folder as [kind]; the folder is removed when no kind is left. */
     fun removeKind(id: String, kind: SoundpackKind) {
         val row = index.folder(id) ?: return
-        val kinds = row.kinds.mapNotNull { SoundpackKind.builtIn(it) }.toSet() - kind
+        val kinds = row.kinds.map { SoundpackKind.forId(it) }.toSet() - kind
         if (kinds.isEmpty())
             remove(id)
         else
@@ -157,8 +190,9 @@ class FolderRegistry private constructor(context: Context) {
     }
 
     /** Rescans one folder, or every folder. Returns the folders whose content changed. */
-    fun rescan(id: String? = null): List<Folder> {
-        val ids = if (id != null) listOf(id) else index.folders().map { it.id }
+    fun rescan(id: String? = null): List<Folder> = rescan(if (id != null) listOf(id) else index.folders().map { it.id })
+
+    private fun rescan(ids: List<String>): List<Folder> {
         val changed = ids.filter { scan(it) }
         notifyChanged()
         return changed.mapNotNull { folder(it) }
@@ -200,7 +234,15 @@ class FolderRegistry private constructor(context: Context) {
             override fun onChange(selfChange: Boolean) = listener()
         }
         served.forEach { (_, authority) -> context.contentResolver.registerContentObserver(packsUri(authority), true, observer) }
-        return AutoCloseable { context.contentResolver.unregisterContentObserver(observer) }
+        typesAuthority?.let { authority ->
+            context.contentResolver.registerContentObserver(
+                Uri.Builder().scheme("content").authority(authority).appendPath(SoundpackContract.Types.PATH).build(), true, observer)
+        }
+        val types = types.observe { Handler(Looper.getMainLooper()).post(listener) }
+        return AutoCloseable {
+            context.contentResolver.unregisterContentObserver(observer)
+            types.close()
+        }
     }
 
     /** An intent for [SoundpackFolderPickerActivity]: the system picker, then linking for
@@ -244,12 +286,12 @@ class FolderRegistry private constructor(context: Context) {
         try {
             val scan = scanner.scan(tree).also { walks.incrementAndGet() }
             scannedInProcess += id
-            val kinds = row.kinds.mapNotNull { SoundpackKind.builtIn(it) }
+            val kinds = row.kinds.mapNotNull { kind(it) }
             val previousFiles = index.files(id).associateBy { it.path }
-            // The stored hash ends with the kinds that scan covered.
+            // The stored hash ends with the kinds that scan covered, with their file types.
             val previouslyScanned = index.contentHash(id)?.substringAfter('|', "")?.split(' ')?.toSet().orEmpty()
             val entries = kinds.flatMap { kind ->
-                if (kind.id !in previouslyScanned)
+                if (scanToken(kind) !in previouslyScanned)
                     return@flatMap scanner.entries(tree, kind, scan.files)
                 val previous = index.entries(id, kind.id).associateBy { it.path }
                 // Unchanged files keep their entry decision and metadata (SF2 presets are not reread).
@@ -258,7 +300,7 @@ class FolderRegistry private constructor(context: Context) {
                 }
                 unchanged.mapNotNull { previous[it.path] } + scanner.entries(tree, kind, changed)
             }
-            val hash = scan.contentHash + "|" + row.kinds.sorted().joinToString(" ")
+            val hash = scan.contentHash + "|" + kinds.map { scanToken(it) }.sorted().joinToString(" ")
             val changed = index.replaceContent(id, scan.displayName, scan.files, entries, hash, now) || row.scanError != null
             if (row.imported && index.folder(id) != null) {
                 val result = imports.sync(id, tree, servedFiles(kinds, scan.files, entries))
@@ -280,14 +322,27 @@ class FolderRegistry private constructor(context: Context) {
         if (kinds.any { it.readScope == SoundpackKind.ReadScope.WHOLE_TREE }) files
         else entries.mapTo(HashSet()) { it.path }.let { paths -> files.filter { it.path in paths } }
 
-    private fun notifyChanged() =
+    /** A kind's id with its file types and read scope: a scan with other ones decides entries
+     * anew. */
+    private fun scanToken(kind: SoundpackKind) =
+        kind.id + ":" + Integer.toHexString((kind.filePatterns.joinToString("\n") + kind.readScope).hashCode())
+
+    private fun notifyChanged() {
         served.forEach { (_, authority) -> context.contentResolver.notifyChange(packsUri(authority), null) }
+        typesAuthority?.let { authority ->
+            val root = Uri.Builder().scheme("content").authority(authority).appendPath(SoundpackContract.Types.PATH).build()
+            context.contentResolver.notifyChange(root, null)
+            types.added().forEach { kind ->
+                context.contentResolver.notifyChange(root.buildUpon().appendPath(kind.id).appendPath(SoundpackContract.PATH_PACKS).build(), null)
+            }
+        }
+    }
 
     private fun packsUri(authority: String) =
         Uri.Builder().scheme("content").authority(authority).appendPath(SoundpackContract.PATH_PACKS).build()
 
     private fun FolderIndex.FolderRow.toFolder() = Folder(id, Uri.parse(treeUri), displayName,
-        kinds.mapNotNull { SoundpackKind.builtIn(it) }.toSet(), revision, scannedAt, scanError, fileCount, totalBytes,
+        kinds.map { kind(it) ?: SoundpackKind.forId(it) }.toSet(), revision, scannedAt, scanError, fileCount, totalBytes,
         imported, importError)
 
     companion object {

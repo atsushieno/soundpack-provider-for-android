@@ -46,8 +46,7 @@ class ShareFolderActivity : ComponentActivity() {
         val tree = intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
         val registry = FolderRegistry.get(this)
         val served = registry.servedKinds()
-        val offered = intent.getStringArrayExtra(SoundpackContract.Hub.EXTRA_KINDS)?.mapNotNull { SoundpackKind.builtIn(it) }
-            ?.filter { it in served }?.toSet().orEmpty()
+        val offered = intent.getStringArrayExtra(SoundpackContract.Hub.EXTRA_KINDS)?.mapNotNull { registry.kind(it) }?.toSet().orEmpty()
         val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) launchedFromPackage else referrer?.host
         val senderLabel = sender?.let { runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(it, 0)).toString() }.getOrNull() } ?: sender ?: "An app"
         setResult(RESULT_CANCELED)
@@ -71,7 +70,7 @@ class ShareFolderActivity : ComponentActivity() {
                         (if (offered.isEmpty()) served else offered).forEach { kind ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(checked = kind in chosen, onCheckedChange = { chosen = if (it) chosen + kind else chosen - kind })
-                                Text(kind.id.uppercase())
+                                Text(kind.label)
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {

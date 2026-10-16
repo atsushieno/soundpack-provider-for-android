@@ -171,6 +171,8 @@ class Sf2FolderProvider : FolderProvider(SoundpackKind.SF2)
 
 class JsfxFolderProvider : FolderProvider(SoundpackKind.JSFX)
 
+class HostSampleFolderProvider : FolderProvider(SoundpackKind.HOST_SAMPLE)
+
 /** Declare with `android:authorities="${applicationId}.soundpack.local.sfz"` and
  * `android:exported="false"`. */
 class LocalSfzFolderProvider : FolderProvider(SoundpackKind.SFZ)
@@ -178,3 +180,5 @@ class LocalSfzFolderProvider : FolderProvider(SoundpackKind.SFZ)
 class LocalSf2FolderProvider : FolderProvider(SoundpackKind.SF2)
 
 class LocalJsfxFolderProvider : FolderProvider(SoundpackKind.JSFX)
+
+class LocalHostSampleFolderProvider : FolderProvider(SoundpackKind.HOST_SAMPLE)

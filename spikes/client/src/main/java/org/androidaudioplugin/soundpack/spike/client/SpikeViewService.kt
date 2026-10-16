@@ -88,7 +88,8 @@ class SpikeViewService : Service() {
     }
 
     override fun onDestroy() {
-        viewHost?.release()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            viewHost?.release()
         super.onDestroy()
     }
 }

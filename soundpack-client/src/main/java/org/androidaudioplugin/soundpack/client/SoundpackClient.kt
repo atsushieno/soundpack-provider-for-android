@@ -34,7 +34,16 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
     private val context: Context = context.applicationContext
     internal val resolver: ContentResolver get() = context.contentResolver
 
-    data class Endpoint(val authority: String, val packageName: String, val local: Boolean)
+    data class Endpoint(
+        val authority: String,
+        val packageName: String,
+        val local: Boolean,
+        /** For a types provider ([SoundpackContract.Types]): the kind its URIs are under. */
+        val kindPath: String? = null,
+    ) {
+        internal fun uri(segments: List<String>): Uri =
+            uri(authority, kindPath?.let { SoundpackContract.Types.segments(it, segments) } ?: segments)
+    }
 
     data class Pack(
         val endpoint: Endpoint,
@@ -85,7 +94,11 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
             .flatMap { info ->
                 info.authority.split(';').filter(kind::matchesAuthority).map { Endpoint(it, info.packageName, local = false) }
             }
-        return (listOfNotNull(local) + discovered).distinctBy { it.authority }
+        // Built-in kinds have providers of their own; any other kind may be one a user defined.
+        val types = if (kind.isBuiltIn) emptyList() else typesProviders(context).map { (authority, packageName) ->
+            Endpoint(authority, packageName, local = false, kindPath = kind.id)
+        }
+        return (listOfNotNull(local) + discovered + types).distinctBy { it.authority }
     }
 
     fun catalog(): Catalog {
@@ -124,18 +137,17 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
         else
             context.registerReceiver(receiver, filter)
         val worker = launch(Dispatchers.IO) {
-            var observed = emptySet<String>()
+            var observed = emptySet<Endpoint>()
             refresh.send(Unit)
             for (signal in refresh) {
                 val catalog = catalog()
-                val authorities = catalog.endpoints.map { it.authority }.toSet()
-                if (authorities != observed) {
+                val endpoints = catalog.endpoints.toSet()
+                if (endpoints != observed) {
                     resolver.unregisterContentObserver(observer)
-                    authorities.forEach {
-                        // Observing a provider we may not read yet (the hub before consent) can be refused.
-                        runCatching { resolver.registerContentObserver(uri(it, SoundpackContract.packsSegments()), true, observer) }
+                    endpoints.forEach {
+                        runCatching { resolver.registerContentObserver(it.uri(SoundpackContract.packsSegments()), true, observer) }
                     }
-                    observed = authorities
+                    observed = endpoints
                 }
                 send(catalog)
             }
@@ -220,7 +232,7 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
      * semantics; ContentResolver.openFileDescriptor refuses ranges. */
     fun openFile(pack: Pack, path: String): AssetFileDescriptor {
         val normalized = PackPath.normalize(path) ?: throw FileNotFoundException("Invalid path: $path")
-        return resolver.openAssetFileDescriptor(uri(pack.endpoint.authority, SoundpackContract.fileSegments(pack.id, pack.revision, normalized)), "r")
+        return resolver.openAssetFileDescriptor(pack.endpoint.uri(SoundpackContract.fileSegments(pack.id, pack.revision, normalized)), "r")
             ?: throw FileNotFoundException(path)
     }
 
@@ -248,7 +260,7 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
         }.filter { SoundpackContract.isValidPackId(it.id) && SoundpackContract.isValidRevision(it.revision) }
 
     private fun <T> query(endpoint: Endpoint, segments: List<String>, row: (Cursor) -> T): List<T> {
-        val cursor = resolver.query(uri(endpoint.authority, segments), null, null, null, null)
+        val cursor = resolver.query(endpoint.uri(segments), null, null, null, null)
             ?: throw IOException("${endpoint.authority} returned no cursor")
         return cursor.use { buildList { while (it.moveToNext()) add(row(it)) } }
     }
@@ -262,6 +274,12 @@ class SoundpackClient(context: Context, val kind: SoundpackKind) {
         fun uri(authority: String, segments: List<String>): Uri =
             Uri.Builder().scheme(ContentResolver.SCHEME_CONTENT).authority(authority)
                 .apply { segments.forEach { appendPath(it) } }.build()
+
+        /** Every visible types provider: authority and package. */
+        fun typesProviders(context: Context): List<Pair<String, String>> =
+            context.packageManager.queryIntentContentProviders(Intent(SoundpackContract.Types.ACTION), 0)
+                .mapNotNull { it.providerInfo }
+                .flatMap { info -> info.authority.split(';').filter(SoundpackContract.Types::matchesAuthority).map { it to info.packageName } }
     }
 }
 

@@ -85,6 +85,17 @@ through the system folder picker (in English):
 ./gradlew :samples:embedded-client:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.allowHubUninstall=true
 ```
 
+## Resource types
+
+Every kind of content is a resource type, with a label, a description and file types
+(wildcards such as `*.sfz`). The defaults are SFZ, SF2, JSFX and "AAP Sample"
+(`hostsample`, `*.wav`, for AAP hosts to play through a plugin). In the Soundpack Manager's
+Types tab, users edit them and add their own, for an app with a format of its own. An added
+type is served by the Manager's types provider (`<package>.soundpack.types`, action
+`org.androidaudioplugin.soundpack.types.V1`). An app finds it by file type with
+`SoundpackTypes.withFileType(context, "*.inst")`, then reads it with `SoundpackClient` like any
+kind. Its id comes from its label and never changes.
+
 ## Reading the Soundpack Manager's folders
 
 The hub's providers are discovered and read like any pack: there is no connect step. A folder

@@ -45,7 +45,7 @@ class SoundpackFolderPickerActivity : Activity() {
             return
         }
         val registry = FolderRegistry.get(this)
-        val kinds = intent.getStringArrayExtra(FolderRegistry.EXTRA_KINDS)?.mapNotNull { SoundpackKind.builtIn(it) }?.toSet().orEmpty()
+        val kinds = intent.getStringArrayExtra(FolderRegistry.EXTRA_KINDS)?.mapNotNull { registry.kind(it) }?.toSet().orEmpty()
         val import = intent.getBooleanExtra(FolderRegistry.EXTRA_IMPORT, false)
         // Scanning, and importing even more, can take a while for a large folder: not on the main thread.
         thread(name = "soundpack-folder-link") {

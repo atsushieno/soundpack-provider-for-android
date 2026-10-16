@@ -47,8 +47,37 @@ class SoundpackContractTest {
         assertTrue(SoundpackKind.JSFX.isEntryCandidate("Effects/delay.jsfx"))
         assertFalse(SoundpackKind.JSFX.isEntryCandidate("Effects/lib.jsfx-inc"))
 
+        assertTrue(SoundpackKind.HOST_SAMPLE.isEntryCandidate("Loops/Drums.WAV"))
+
         assertEquals(SoundpackKind.SF2.readScope, SoundpackKind.ReadScope.ENTRIES_ONLY)
         assertTrue(SoundpackKind.isValidId("com.example.wavetable"))
         assertFalse(SoundpackKind.isValidId("SFZ"))
+        assertFalse("taken by the types provider", SoundpackKind.isValidId("types"))
+        assertEquals(SoundpackKind.SFZ, SoundpackKind.forId("sfz"))
+        assertFalse(SoundpackKind.forId("inst").isBuiltIn)
+    }
+
+    @Test
+    fun filePatterns() {
+        assertTrue(FilePatterns.matches("*.inst", "Strings.INST"))
+        assertFalse(FilePatterns.matches("*.inst", "Strings.ins"))
+        assertTrue(FilePatterns.matches("piano-??.wav", "piano-01.wav"))
+        assertFalse(FilePatterns.matches("piano-??.wav", "piano-1.wav"))
+        assertTrue(FilePatterns.matches(FilePatterns.NO_EXTENSION, "delay"))
+        assertFalse(FilePatterns.matches(FilePatterns.NO_EXTENSION, "delay.jsfx"))
+        assertTrue("regex characters are literal", FilePatterns.matches("a+b.(x)", "A+B.(X)"))
+        assertFalse(FilePatterns.isValid("dir/*.wav"))
+        assertTrue(FilePatterns.matchesAny(listOf("*.inst", "*.mlt"), "Library/Multis/Big.mlt"))
+        assertEquals(listOf("*.inst", "*.mlt"), FilePatterns.parse(" *.inst, *.mlt;*.inst "))
+    }
+
+    @Test
+    fun typeRoutes() {
+        val file = SoundpackContract.fileSegments("p", "1", "a/b.inst")
+        assertEquals("inst" to Route.File("p", "1", "a/b.inst"),
+            SoundpackContract.Types.route(SoundpackContract.Types.segments("inst", file)))
+        assertNull(SoundpackContract.Types.route(SoundpackContract.Types.listSegments()))
+        assertNull(SoundpackContract.Types.route(listOf("types", "Bad", "packs")))
+        assertTrue(SoundpackContract.Types.matchesAuthority(SoundpackContract.Types.authorityFor("org.example")))
     }
 }

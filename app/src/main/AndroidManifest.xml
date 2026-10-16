@@ -49,5 +49,23 @@
                 <action android:name="org.androidaudioplugin.soundpack.jsfx.V1" />
             </intent-filter>
         </provider>
+        <provider
+            android:name="org.androidaudioplugin.soundpack.host.HostSampleFolderProvider"
+            android:authorities="${applicationId}.soundpack.hostsample"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.hostsample.V1" />
+            </intent-filter>
+        </provider>
+        <!-- The resource types the user adds in the Types tab, all through one provider: a type
+             defined at run time cannot declare one of its own. -->
+        <provider
+            android:name="org.androidaudioplugin.soundpack.host.TypesFolderProvider"
+            android:authorities="${applicationId}.soundpack.types"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.androidaudioplugin.soundpack.types.V1" />
+            </intent-filter>
+        </provider>
     </application>
 </manifest>

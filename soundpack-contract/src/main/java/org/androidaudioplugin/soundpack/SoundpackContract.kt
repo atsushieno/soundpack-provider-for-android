@@ -41,6 +41,46 @@ object SoundpackContract {
         const val EXTRA_KINDS = "$NAMESPACE.extra.KINDS"
     }
 
+    /** Kinds defined at run time, such as the resource types a user adds in the Soundpack
+     * Manager for an app's own file format. They cannot each declare a provider,
+     * so one provider per app serves them all: authority `<package>.soundpack.types`, action
+     * [ACTION]. `types` lists the kinds it serves, one row each ([COLUMNS]); every other URI is
+     * the usual layout under `types/<kind id>/` ([segments]). */
+    object Types {
+        const val ACTION = "$NAMESPACE.types.V1"
+        const val PATH = "types"
+        const val KIND_ID = "kind_id"
+        const val LABEL = "label"
+        const val DESCRIPTION = "description"
+        /** Space-separated [FilePatterns]. */
+        const val FILE_PATTERNS = "file_patterns"
+        /** [READ_WHOLE_TREE] or [READ_ENTRIES_ONLY]. */
+        const val READ_SCOPE = "read_scope"
+        const val READ_WHOLE_TREE = "whole_tree"
+        const val READ_ENTRIES_ONLY = "entries_only"
+        val COLUMNS = arrayOf(KIND_ID, LABEL, DESCRIPTION, FILE_PATTERNS, READ_SCOPE)
+
+        fun authorityFor(applicationId: String) = "$applicationId.soundpack.$PATH"
+        fun matchesAuthority(authority: String) = authority.endsWith(".soundpack.$PATH")
+
+        fun listSegments() = listOf(PATH)
+        /** [inner], one of the usual URIs ([packsSegments] and the others), for [kindId]. */
+        fun segments(kindId: String, inner: List<String>) = listOf(PATH, kindId) + inner
+
+        /** The kind and the usual route of a types-provider URI; null for anything else. */
+        fun route(segments: List<String>): Pair<String, Route>? {
+            if (segments.size < 3 || segments[0] != PATH || !SoundpackKind.isValidId(segments[1]))
+                return null
+            return SoundpackContract.route(segments.drop(2))?.let { segments[1] to it }
+        }
+
+        fun readScopeOf(value: String?) =
+            if (value == READ_WHOLE_TREE) SoundpackKind.ReadScope.WHOLE_TREE else SoundpackKind.ReadScope.ENTRIES_ONLY
+
+        fun readScopeValue(scope: SoundpackKind.ReadScope) =
+            if (scope == SoundpackKind.ReadScope.WHOLE_TREE) READ_WHOLE_TREE else READ_ENTRIES_ONLY
+    }
+
     object Packs {
         const val PACK_ID = "pack_id"
         const val LABEL = "label"

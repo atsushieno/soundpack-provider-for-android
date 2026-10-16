@@ -205,6 +205,10 @@ Each kind is defined once, in the contract module:
 | `sfz` | `org.androidaudioplugin.soundpack.sfz.V1` | `${applicationId}.soundpack.sfz` | `*.sfz` (packs may list them explicitly) | whole pack tree: includes, samples, `..` within root | none |
 | `sf2` | `org.androidaudioplugin.soundpack.sf2.V1` | `${applicationId}.soundpack.sf2` | `*.sf2`, `*.sf3` anywhere in the tree; users manage SF2s as folders, and the folder hierarchy is the browsing structure | the entry files; apps read whole SF2s, and other files in the tree are not served | preset list (bank, program, name) from PHDR |
 | `jsfx` | `org.androidaudioplugin.soundpack.jsfx.V1` | `${applicationId}.soundpack.jsfx` | candidates only; the client's parser decides | whole pack tree: imports, data, gfx | `desc:` hint |
+| `hostsample` ("AAP Sample") | `org.androidaudioplugin.soundpack.hostsample.V1` | `${applicationId}.soundpack.hostsample` | `*.wav`: audio an AAP host plays through a plugin to try it (aap-core#165) | the entry files | none |
+
+Each kind also has a label, a description and its file types as wildcards (`*.sfz`; `*.`
+for names without an extension), which users can edit in the Soundpack Manager (D7).
 
 The URIs are tedious only if someone writes them by hand. Here nobody does:
 
@@ -220,6 +224,12 @@ The URIs are tedious only if someone writes them by hand. Here nobody does:
 - Third-party kinds (wavetables, IRs or NAM models for aap-juce-tone3000/byod, Scala tunings,
   DX7 cartridges for dexed) follow the same convention with a reverse-DNS kind id. They need
   no change to the hub's protocol; the hub UI only needs to know their file patterns.
+- Resource types a user adds in the Soundpack Manager, for an app with a format of its own,
+  cannot declare providers. One provider per app serves them all (D7):
+  `${applicationId}.soundpack.types`, action `org.androidaudioplugin.soundpack.types.V1`.
+  `types` lists them (id, label, description, file types, read scope), and every other URI
+  is the usual layout under `types/<kind id>/`. `SoundpackClient` reaches them by kind id,
+  and `SoundpackTypes.list()` returns every type an app can find.
 
 Each kind has its own provider, so a folder linked only as SFZ is not served as JSFX or SF2
 (D6).
@@ -1120,5 +1130,25 @@ Kind first, then the folder, and import or in place (D6), 2026-10-16:
     `detectKinds` and the kinds dialog are gone. The C API adds
     `soundpack_host_import_folder`, `soundpack_host_set_imported` and
     `soundpack_folder_imported`; the existing functions are unchanged.
+
+- **D7. Resource types.** *Resolved 2026-10-16* (aap-core#165): there is no generic "WAV"
+  type. Instead every kind is a resource type with a label, a description and file types
+  (wildcards):
+  - **Defaults:** SFZ, SF2, JSFX and "AAP Sample" (`hostsample`), a built-in kind with
+    its own providers, so aap-core's plugin manager can embed it as sfizz embeds SFZ.
+  - **User-defined types:** users add types in the Soundpack Manager's Types tab, for an app
+    with a format of its own. A type's id comes from its label when it is created and never
+    changes, since saved identities carry it. Its folders are served whole, and its file types
+    pick the entries, as an app may need what is next to them (samples next to an
+    instrument); users get no option for this. The Manager serves all added types through one
+    types provider (§3.2).
+  - **Editing:** default types are fully editable (label, description, file types) and can be
+    reset, but not deleted; they keep their read scope, which their players depend on.
+    Changing a type's file types rescans the folders linked as it. Deleting an added type
+    stops using its folders as it.
+  - **Storage:** the definitions are kept in the app's settings, through host-core's
+    `ResourceTypes`. Apps that never edit them get the defaults.
+  - **Presentation:** the folder screen shows the type's label, and its description when
+    there is one, next to the link-or-import text, which is now the same for every type.
 
 All decisions are settled.

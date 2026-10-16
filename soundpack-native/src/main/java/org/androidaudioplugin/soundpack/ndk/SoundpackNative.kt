@@ -35,9 +35,11 @@ internal object SoundpackNative {
 
     private fun string(bytes: ByteArray) = bytes.toString(Charsets.UTF_8)
 
-    private fun kind(id: String) = requireNotNull(SoundpackKind.builtIn(id)) { "Unknown soundpack kind: $id" }
+    private fun kind(id: String) = SoundpackKind.forId(id.also { require(SoundpackKind.isValidId(it)) { "Not a soundpack kind: $it" } })
 
-    private fun kinds(list: String) = list.split(',').map { it.trim() }.filter { it.isNotEmpty() }.map { kind(it) }.toSet()
+    /** Kinds this app links folders as: built-in ones it declares, or types its user added. */
+    private fun kinds(list: String) = list.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        .map { requireNotNull(FolderRegistry.get(context).kind(it)) { "This app does not link folders as $it" } }.toSet()
 
     private fun client(kind: SoundpackKind) = clients.getOrPut(kind) { SoundpackClient(context, kind) }
 
