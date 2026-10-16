@@ -17,11 +17,11 @@ rootProject.name = "soundpack-provider-for-android"
 
 // Libraries (docs/PLAN.md §4).
 include(":soundpack-contract", ":soundpack-provider-sdk", ":soundpack-client", ":soundpack-testkit")
-include(":soundpack-host-core", ":soundpack-host-ui", ":soundpack-ui-compose")
+include(":soundpack-host-core", ":soundpack-host-ui", ":soundpack-ui-compose", ":soundpack-native")
 
 // Sample pack APKs, one per built-in kind.
 include(":samples:sample-sfz-pack", ":samples:sample-sf2-pack", ":samples:sample-jsfx-pack")
-include(":samples:embedded-client")
+include(":samples:embedded-client", ":samples:native-client")
 
 // The Soundpack Manager (the hub).
 include(":app")

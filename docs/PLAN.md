@@ -161,7 +161,7 @@ the folder work, whether it runs in the hub or embedded in an app:
                                                                             ▼
  Consumer app (aap-lv2-sfizz plugin process, usf2plugin, uapmd …)
    soundpack-client (Kotlin): discovery, access state, catalog Flow, PackSession, materialize
-   soundpack-native (C ABI over JNI): open session, open fd, mmap helper
+   soundpack-native (C ABI over JNI): entries, sessions, fds, mmap helper, host folders
    soundpack-ui-compose: picker tree
    embedded host core (opt-in per kind):
      <provider …soundpack.local.sfz>  not exported; this app's own folders, no hub needed
@@ -440,7 +440,8 @@ soundpack-provider-for-android/
   soundpack-contract/           kinds, URIs, columns, identity parser, path normaliser, SF2 PHDR reader
   soundpack-provider-sdk/       SoundpackProvider base (URI layout, rules) + AssetPackProvider
                                 and its res/xml metadata parser
-  soundpack-client/             Kotlin client + prefab native module (C ABI, JNI, mmap helper)
+  soundpack-client/             Kotlin client: discovery, catalog, sessions, prefetch, materialize
+  soundpack-native/             prefab AAR: the C API (soundpack.h, soundpack_host.h) over JNI, mmap helper
   soundpack-ui-compose/         SoundpackPicker (generalised SfzTree)
   soundpack-host-core/          folder sources, SAF walker, pipe→cache, index DB, kind indexers,
                                 folder provider base + Local<Kind>FolderProvider classes,
@@ -450,7 +451,8 @@ soundpack-provider-for-android/
   app/                          Soundpack Manager hub: host core + host UI + exported providers,
                                 folder sharing
   samples/                      sample-sfz-pack (ported sample-sfz-provider), sample-sf2-pack, sample-jsfx-pack,
-                                embedded-client (embedded folder mode, Phase 2 gate tests)
+                                embedded-client (embedded folder mode, Phase 2 gate tests),
+                                native-client (the C API from C++, Phase 5 tests)
   tools/                        make-sample-sf2.py (generates the sample SoundFonts)
   docs/
 ```
@@ -459,7 +461,9 @@ soundpack-provider-for-android/
   plus the mmap helper. C rather than C++ because sfizz, JUCE apps and uapmd all link
   `c++_shared` with different toolchains; a C ABI stays out of that.
 - **Native packaging.** The native module is shipped as a prefab AAR, which AAP projects
-  already consume (`buildFeatures { prefab = true }`).
+  already consume (`buildFeatures { prefab = true }`). It is built with `ANDROID_STL=none`.
+  It is a module of its own, `soundpack-native`, because its folder functions need host-core,
+  which the client must not depend on.
 - **Pack declaration** follows AAP's `aap_metadata.xml` convention. A `<meta-data>` on the
   `<provider>` points at `@xml/soundpack_<kind>`:
 
@@ -482,31 +486,57 @@ soundpack-provider-for-android/
 
   Packs that compute their lists in code, as vpo3 does today, subclass and override
   `packs()`. The `noCompress` requirement stays.
-- **C API sketch** (`soundpack.h`):
+- **C API** (`soundpack.h`, `soundpack_host.h`):
 
   ```c
-  int  soundpack_init(JavaVM*, jobject context);               // once, on a Java thread
-  soundpack_session* soundpack_open(const char* identity, char* err, size_t errlen); // blocking IPC
+  int  soundpack_init(JNIEnv*, jobject context);                // once, from a thread with a JNIEnv
+  const char* soundpack_last_error(void);                       // the last failure on this thread
+  int  soundpack_format_identity(const char* kind, const char* pack_id, const char* entry_path,
+                                 char* out, size_t out_length);
+
+  // every entry of a kind, from every source; accessors per index, then free
+  soundpack_entry_list* soundpack_list_entries(const char* kind);
+  size_t      soundpack_entry_list_count(const soundpack_entry_list*);
+  const char* soundpack_entry_identity(const soundpack_entry_list*, size_t index);
+  //          ..._pack_label, _path, _label, _group, _metadata (JSON, e.g. SF2 presets)
+  void        soundpack_entry_list_free(soundpack_entry_list*);
+
+  soundpack_session* soundpack_open(const char* identity);      // blocking IPC
   const char* soundpack_session_entry(const soundpack_session*);
   size_t      soundpack_session_file_count(const soundpack_session*);
   const char* soundpack_session_file_path(const soundpack_session*, size_t index);
+  int  soundpack_session_prefetch(soundpack_session*, const char* const* paths, size_t count);
   int  soundpack_session_open_fd(soundpack_session*, const char* path, int* fd, int64_t* offset, int64_t* length);
   int  soundpack_session_map(soundpack_session*, const char* path, soundpack_mapping* out);
   void soundpack_mapping_release(soundpack_mapping*);
   void soundpack_session_close(soundpack_session*);
-  int  soundpack_materialize(const char* kind, const char* pack_id, const char* dest_dir, char* err, size_t errlen);
+  int  soundpack_materialize(const char* kind, const char* pack_id, const char* dest_dir);
 
-  // UI-free host API (embedded local folders, §3.9)
-  int  soundpack_host_list_folders(const char* kind, soundpack_folder_list** out);
-  void soundpack_host_add_folder(const char* kind, soundpack_folder_callback cb, void* user); // runs the picker
+  // soundpack_host.h: UI-free host API (embedded local folders, §3.9)
+  soundpack_folder_list* soundpack_host_list_folders(void);
+  //          soundpack_folder_count, _id, _display_name, _tree_uri, _kinds, _available,
+  //          _file_count, _error, soundpack_folder_list_free
+  int  soundpack_host_add_folder(const char* tree_uri, const char* kinds, char* id_out, size_t id_len);
   int  soundpack_host_remove_folder(const char* folder_id);
-  int  soundpack_host_set_kinds(const char* folder_id, const char* const* kinds, size_t count);
+  int  soundpack_host_set_kinds(const char* folder_id, const char* kinds);    // "sf2,sfz"
   int  soundpack_host_rescan(const char* folder_id /* NULL: all */);
   ```
 
   The C functions call into the Kotlin client, so identity parsing, access state and
   discovery live in one place. JUCE apps pass `juce::getEnv()`/`getAppContext()`; SDL apps
-  pass `SDL_GetAndroidJNIEnv()`/`SDL_GetAndroidActivity()`.
+  pass `SDL_GetAndroidJNIEnv()`/`SDL_GetAndroidActivity()`. `soundpack_init()` loads the
+  Kotlin side through the context's class loader, so later calls work from threads the engine
+  created. Strings cross JNI as UTF-8 byte arrays, because JNI's own strings are "modified
+  UTF-8".
+
+  Changes from the first sketch, made in Phase 5:
+  - Errors go to `soundpack_last_error()`, per thread, instead of a buffer in every call.
+  - Entries can be listed, with their metadata, so usf2plugin lists SF2 presets without
+    opening any SF2.
+  - `soundpack_host_add_folder` links a tree URI that the app's own picker returned, instead
+    of running a picker. JUCE and SDL apps already have one, and the plugin UI keeps its own
+    folder button (D5).
+  - `soundpack_session_prefetch` exposes `PackSession.prefetch()` (Phase 4).
 - **Names (D3).** Everything that can never change goes under
   `org.androidaudioplugin.soundpack`: actions, `<meta-data>` names, the hub's applicationId
   and permission, and the Maven group (already published). Authority suffixes follow the
@@ -520,7 +550,8 @@ soundpack-provider-for-android/
   | --- | --- |
   | contract | Kotlin stdlib only, so `uapmd-kmp` can later use it on desktop to parse identities. For now it is built as an Android library with no `android.*` imports |
   | provider-sdk | contract |
-  | client | contract, kotlinx-coroutines (`Flow`); the native part needs only the NDK |
+  | client | contract, kotlinx-coroutines (`Flow`) |
+  | native | client, and host-core for the folder functions; C only, no C++ runtime |
   | host-core | provider-sdk (its folder providers extend `SoundpackProvider`) and the platform's SQLite; no client, no Compose, no Room, no coroutines |
   | host-ui | host-core, Compose Material3, activity-compose, coroutines |
   | ui-compose | client, Compose Material3, coroutines |
@@ -534,7 +565,7 @@ soundpack-provider-for-android/
 | --- | --- |
 | **aap-lv2-sfizz** | Delete `SfzResourceClient`, `SfzFolders`, `SfzFoldersActivity`, `SfzTree` and the `:sfz-provider` / `:sample-sfz-provider` modules. Declare `LocalSfzFolderProvider`, so local folders keep working without the hub. The existing `sfz-folders` trees are carried over on first launch, reusing their grants (§3.7). `SfzResourceViewFactory`, the plugin UI, uses `SoundpackPicker(kind = SFZ)` and keeps its "SFZ folders" button, which now opens `SoundpackFoldersActivity` (D5). `SfizzActivity` is not changed. A `PackSession` adapts directly to the existing `AudioPluginLV2ResourceBridge.Snapshot` (entry, names, lazy opener), so `AudioPluginLV2Resources_jni.cpp` and the sfizz patch are unchanged at first. Later the native mapping moves onto `soundpack-native`, and every pack goes through the lazy (ABI v2) path. `BundledSfzResourceService` becomes an SDK `<provider>`, or an in-process asset source if the piano should stop being advertised to other apps. Old `aap-sfz://` states restore as unavailable (§3.7). |
 | **aap-sfz-vpo3, aap-sfz-salamander-drumkit** | Remove the vendored `sfz-provider/`. Depend on `soundpack-provider-sdk`, and declare the provider and XML (vpo3 keeps its code-generated list; `resourcePaths` becomes `scopes`). This is a clean break: release them together with the new sfizz, and say in the release notes that all three must be updated, because old and new versions cannot see each other. |
-| **aap-juce-usf2plugin** | Rewrite the Android hunks of `aap-juce-support.patch`. Declare `LocalSf2FolderProvider`. `SoundFontDirectory`'s tree-URL branch becomes "soundpack packs of kind SF2", taken from the local provider plus the hub when connected. `scanDocumentTree`/`findDocument`/`readPresetHeaders` over SAF become index queries, with presets taken from entry metadata. `SoundFontFile::loadData` maps the file instead of copying it. `sf2Absolute` stores the identity. Existing tree URLs in the `sf2Folders` setting are carried over to the local provider once, reusing their grants. On Android, the folder part of `DirectorySettingsPanel` keeps its JUCE look but runs on the UI-free host API through the C API (§3.9). Adding a folder starts the system picker, so it is offered only when the editor runs in the plugin app's own activity; inside a host, the panel lists the folders and says where to add them (S5). Desktop is unaffected. |
+| **aap-juce-usf2plugin** | Rewrite the Android hunks of `aap-juce-support.patch`. Declare `LocalSf2FolderProvider` and link `soundpack-native`. The library lists SF2s through `soundpack_list_entries("sf2")`, so every source appears: its own linked folders, pack apps, and the Manager's shared folders. `scanDocumentTree`/`findDocument`/`readPresetHeaders` over SAF go away; presets come from entry metadata. `SoundFontFile::loadData` maps the file instead of copying it. `sf2Absolute` stores the identity. Existing tree URLs in the `sf2Folders` setting are carried over to the local provider once, reusing their grants, and states that name a document in such a tree resolve through the linked folder. On Android, `DirectorySettingsPanel` keeps its JUCE look and its folder picker in the plugin UI (D5), and links the picked tree through the UI-free host API (§3.9). Inside a host, Android blocks the picker on 14+ (S5). Desktop is unaffected. |
 | **uapmd** | Declare `LocalJsfxFolderProvider` and add an Android-only JSFX source. `AppModel::syncJsfxRegisteredFolders` calls `soundpack_materialize("jsfx", pack, jsfxFolderMirrorRoot()/<name>)` for each JSFX pack in the catalog: local folders, plus the hub's when connected. Registered folders from `jsfxRegisteredFolders()` are carried over to the local provider once, reusing their grants. On Android, the registered-folder part of `JsfxResourcesWindow` stays in ImGui but runs on the UI-free host API through the C API, so uapmd takes on no Compose dependency. `IDocumentProvider` stays for project and file documents. Desktop and wasm are unaffected. |
 | **Candidates later** | aap-juce-ysfx (JSFX), aap-juce-tone3000/byod (IR/NAM kinds), dexed (cartridges). |
 
@@ -797,6 +828,48 @@ Problems found that are not caused by the migration:
 Gate: without the hub, usf2plugin lists SF2s from local folders, with presets, without
 opening any SF2 during a scan. Loading maps the file instead of copying it. State
 round-trips. Existing `sf2Folders` tree URLs carry over.
+
+Status (2026-10-16): **gate passed on the Galaxy Tab A11+ (Android 16).** The external host
+check and usf2plugin's desktop build were not run.
+
+- **soundpack-native**: the C API of §4, as a prefab AAR, published to Maven Local with the
+  other libraries.
+- **samples/native-client** uses it from C++ built with `c++_shared`. Its `NativeApiTest`
+  (4 tests) passes:
+  - It lists the sample SF2 pack's entries, with presets in their metadata.
+  - It opens an identity, prefetches its files, maps the entry (`RIFF…sfbk`), and gets a
+    descriptor with an offset into the pack APK.
+  - A bad identity, and a tree URI the app holds no grant for, fail with a message in
+    `soundpack_last_error()`.
+  - It links a folder picked in the system picker, lists and rescans it, finds an entry by
+    `soundpack_format_identity`, and unlinks the folder.
+- **aap-juce-usf2plugin**:
+  - `aap-juce-support.patch` adds `src/android/Soundpacks.{h,cpp}`, a C++ wrapper over the C
+    API. It rewrites the Android parts of `AppSettings`, `SoundFontLibrary`,
+    `PluginProcessor`, `DirectoryBar` and `DirectorySettingsPanel`, under `JUCE_ANDROID`.
+    The SAF tree walker and the preset reading over SAF are gone.
+  - The app declares `LocalSf2FolderProvider` and depends on `soundpack-native`.
+  - The directory panel adds folders with JUCE's folder picker, as before, then links the
+    tree on a background thread. Refresh rescans the linked folders.
+  - On start, the `content://` keys of `sf2Folders` are linked and removed from the setting.
+  - Device test: `SoundpackStateTest` loads the sample pack's `Sines.sf2` by identity
+    through `setState`, checks that the saved state names it, and restores it in a fresh
+    instance.
+- In CI, aap-juce-usf2plugin has this repository as the
+  `external/soundpack-provider-for-android` submodule, like sfizz. aap-juce's reusable
+  `build-dist-with-cmake.yml` publishes it into Maven Local when a port has that submodule.
+
+Results on the Galaxy Tab:
+
+- Migration with real data: the previous usf2plugin had `Download/SF2` linked. On first start
+  it was linked again without picking (`saf-3d413620…`), and its 3 SoundFonts were indexed
+  with their presets. A state saved with the old document URL of `MS_Basic.sf2` resolved to
+  `commons-soundpack://sf2/saf-3d413620…/MS_Basic.sf2`.
+- In usf2plugin's own app, the plugin UI lists 6 SoundFonts: the bundled GeneralUser GS, the
+  2 of the sample pack and the 3 of the migrated folder. It lists 887 presets in all (e.g.
+  MS_Basic 309, alex_gm 137), read from the index. Selecting MS_Basic loads it.
+- The first build showed 0 presets for every soundpack entry. The wrapper read the preset
+  array out of a parsed JSON value that had already been destroyed. Fixed in the patch.
 
 **Phase 6: uapmd JSFX.**
 

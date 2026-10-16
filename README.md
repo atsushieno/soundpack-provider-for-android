@@ -28,12 +28,13 @@ Status:
 | `soundpack-contract` | Kinds, content URI layout, columns, `commons-soundpack://` identities, path rules, SF2 preset reader, SFZ reference scanner. Pure Kotlin. |
 | `soundpack-provider-sdk` | `SoundpackProvider` base class, and `AssetPackProvider` for packs shipped as APK assets (`SfzAssetPackProvider`, `Sf2AssetPackProvider`, `JsfxAssetPackProvider`). |
 | `soundpack-client` | `SoundpackClient`: discovery, catalog (and a live `Flow`), opening saved identities, prefetching an instrument's files (`PackSession.prefetch`), `materialize` for path-only engines. |
+| `soundpack-native` | The C API for native engines (`soundpack.h`, `soundpack_host.h`), as a prefab package: entries with their metadata, sessions with file descriptors, mappings and prefetch, `materialize`, and linked folders. Pure C, so it needs no C++ runtime. |
 | `soundpack-testkit` | `ProviderConformance`, to check any provider from a device test. |
 | `soundpack-host-core` | Linked folders without any UI toolkit: `FolderRegistry`, the folder index, `Local{Sfz,Sf2,Jsfx}FolderProvider`, and a picker activity that links in one step. |
 | `soundpack-host-ui` | Optional Compose folder management: `SoundpackFoldersScreen` / `SoundpackFoldersActivity`. |
 | `soundpack-ui-compose` | `SoundpackPicker`: every readable pack's entries as a tree. |
 | `app` | The Soundpack Manager (`org.androidaudioplugin.soundpack.manager`): folders shared with every soundpack app. |
-| `samples/` | One small pack APK per kind, and `embedded-client`, an app with its own folders that also reads the hub. |
+| `samples/` | One small pack APK per kind; `embedded-client`, an app with its own folders that also reads the hub; and `native-client`, which uses the C API from C++. |
 | `spikes/` | Phase 0 throwaway APKs. |
 
 ## Build and test
@@ -71,6 +72,13 @@ so it runs only when asked:
 
 ```sh
 ./gradlew :app:installDebug
+```
+
+The C API tests need the sample SF2 pack. One of them links `/sdcard/Music/SoundpackNativeTest`
+through the system folder picker (in English):
+
+```sh
+./gradlew :samples:native-client:connectedDebugAndroidTest
 ```
 
 ```sh
@@ -112,6 +120,23 @@ of:
 - `FolderRegistry` directly, from your own UI.
 
 The first two start activities; see "Where setup happens".
+
+## From native code
+
+Depend on `soundpack-native`, enable `buildFeatures { prefab = true }`, and link it in CMake:
+
+```cmake
+find_package(soundpack-native REQUIRED CONFIG)
+target_link_libraries(your-engine PRIVATE soundpack-native::soundpack)
+```
+
+Call `soundpack_init()` once, from a thread that has a `JNIEnv` (JUCE apps pass
+`juce::getEnv()` and `juce::getAppContext()`). Every call may block on IPC, so never call one
+from an audio thread. `soundpack_list_entries("sf2")` lists entries from every source, with the
+metadata the index holds (SF2 presets, for example), so listing opens no files.
+`soundpack_open()` takes a saved identity, and `soundpack_session_map()` maps one of its files
+read-only. For linked folders, `soundpack_host.h` links a tree URI that the app already holds
+a grant for, so the app keeps its own folder picker. `samples/native-client` uses all of it.
 
 ## Publishing a pack
 

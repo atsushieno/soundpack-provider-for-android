@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="Soundpack Native Sample">
+        <!-- The app's own folder picker, as a JUCE app has one: it keeps the grant, then the
+             native code links the folder (soundpack_host_add_folder). -->
+        <activity
+            android:name=".PickFolderActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <provider
+            android:name="org.androidaudioplugin.soundpack.host.LocalSf2FolderProvider"
+            android:authorities="${applicationId}.soundpack.local.sf2"
+            android:exported="false" />
+    </application>
+</manifest>

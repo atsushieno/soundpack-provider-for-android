@@ -1,4 +1,6 @@
 [versions]
+ndk = "29.0.14206865"
+cmake = "3.31.5"
 
 # Aligned with the AAP repositories (aap-lv2-sfizz, aap-core).
 android-compileSdk = "37"
