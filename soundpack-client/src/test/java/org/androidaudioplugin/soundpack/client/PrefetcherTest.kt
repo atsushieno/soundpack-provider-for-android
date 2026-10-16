@@ -63,7 +63,9 @@ class PrefetcherTest {
             assertEquals(3, opener.opened.size)
             prefetcher.take("1")!!
             waitUntil { opener.opened.size == 4 }
-            assertEquals(listOf("1", "2", "3", "4"), opener.opened.map { it.path })
+            // Opened 4 at a time, they finish in any order.
+            assertEquals(setOf("1", "2", "3", "4"), opener.opened.map { it.path }.toSet())
+            assertEquals(4, opener.opened.size)
         }
     }
 
