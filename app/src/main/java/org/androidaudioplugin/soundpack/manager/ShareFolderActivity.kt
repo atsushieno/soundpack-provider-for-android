@@ -6,6 +6,8 @@ import android.provider.DocumentsContract
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +27,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -68,17 +71,19 @@ class ShareFolderActivity : ComponentActivity() {
                         Text("$senderLabel offers this folder. Every soundpack app will be able to read it, as the kinds below.")
                         // The app uses it as these kinds; without any, the user says what it is for.
                         (if (offered.isEmpty()) served else offered).forEach { kind ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = kind in chosen, onCheckedChange = { chosen = if (it) chosen + kind else chosen - kind })
+                            // The whole row, label included, toggles it.
+                            Row(Modifier.toggleable(kind in chosen, role = Role.Checkbox) { chosen = if (it) chosen + kind else chosen - kind },
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = kind in chosen, onCheckedChange = null)
                                 Text(kind.label)
                             }
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = !import, onClick = { import = false })
+                        Row(Modifier.selectable(!import, role = Role.RadioButton) { import = false }, verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = !import, onClick = null)
                             Text("Use it in place: no copy, slower loading")
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = import, onClick = { import = true })
+                        Row(Modifier.selectable(import, role = Role.RadioButton) { import = true }, verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = import, onClick = null)
                             Text("Import a copy: loads fast and works without the folder, takes storage")
                         }
                         status?.let { Text(it, color = MaterialTheme.colorScheme.error) }

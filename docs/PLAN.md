@@ -984,11 +984,36 @@ Kind first, then the folder, and import or in place (D6), 2026-10-16:
   entries in memory. A write from the same process invalidates them at once
   (`FolderIndex.writes`), and a write from another process within 250 ms
   (`FolderIndex.stamp`, read without a cursor). An imported folder now loads like the APK.
-- **Open: later loads in sfizz's process are slower than the first** for the in-process
-  sources: the piano from sfizz's own APK goes from 185 ms to 463 ms, and the folder in place
-  from 610 ms to 1002 ms. The Galaxy Tab did not show this for the piano (197 ms, then 150 ms).
-  The cause is not known yet. The sessions sfizz opens are never closed, because the native
-  bridge drops a lazy snapshot without calling its `close()`; that is a candidate.
+- Load times on the Galaxy Tab, after that fix, with the kit's folder from the Manager's
+  shared SFZ folder (`-e kitPath Download/SFZ/endolith/salamander-drumkit/1.0.0`):
+
+  | Instrument, source | First load | Later loads (median) | One open, alone / 8 at a time |
+  | --- | --- | --- | --- |
+  | Piano, file in app storage, as before soundpacks | 113 ms | 114 ms | — |
+  | Piano, soundpack from sfizz's own APK | 189 ms | 150 ms | — |
+  | Salamander `ALL.sfz`, from its pack app | 930 ms | 363 ms | 1.28 / 0.27 ms |
+  | The same kit, folder shared in the Manager, in place | 2.59 s | 1.86 s | 29.04 / 2.47 ms |
+  | The same kit, sfizz's own folder, in place | 1.52 s | 1.52 s | 20.56 / 2.17 ms |
+  | The same kit, sfizz's own folder, imported | 438 ms | 318 ms | 0.33 / 0.11 ms |
+  | The same kit, folder imported in the Manager | 1020 ms | 407 ms | 1.59 / 0.34 ms |
+
+  Importing the kit (550 files, 261 MB) took 3.4 s in sfizz and 4.3 s in the Manager. The
+  Manager case (`salamanderFromManagerImported`) shares the folder from sfizz with "Import a
+  copy", unlinks it in sfizz, and removes it from the Manager afterwards; its first load
+  starts the Manager's process. An imported folder now loads faster than the pack app's APK
+  in the same app, and about as fast from the Manager, and the Manager's folder in place dropped from 3.7 s to 1.86 s, since
+  the Manager's provider no longer queries SQLite on every open either. The Tab shows no
+  slowdown in later loads.
+- **Not a soundpack issue: on the Pixel, later loads in a process are slower than the
+  first, for every source.** Once sfizz closed its sessions (below), the Pixel still showed
+  it: piano from a file 92 ms, then 154 ms; piano from sfizz's APK 353 ms, then 446 ms; the
+  kit's folder in place 650 ms, then 987 ms; imported, 407 ms, then 692 ms. The plain file
+  path, which uses no soundpack code, slows the same way, and the Galaxy Tab shows none of it.
+  The likely cause is the Pixel's CPU boost after a process starts wearing off.
+- **Fixed: sfizz never closed the sessions of the instruments it replaced.** Its native bridge
+  dropped a lazy snapshot without calling `close()`, so each session's prefetch threads, and
+  any files they had opened that sfizz never took, stayed until the prefetcher idled 10 s
+  later. `~Pack` now closes the snapshot. sfizz's device tests pass.
 
 
 7. Testing
