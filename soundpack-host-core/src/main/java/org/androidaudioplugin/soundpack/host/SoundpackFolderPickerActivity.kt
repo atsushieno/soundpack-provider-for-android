@@ -9,8 +9,9 @@ import android.provider.DocumentsContract
 import org.androidaudioplugin.soundpack.SoundpackKind
 import kotlin.concurrent.thread
 
-/** Runs the system folder picker, then links the chosen folder in [FolderRegistry]. No UI of
- * its own and no Compose, so apps whose UI is ImGui or JUCE can use it (§3.9). Start it with
+/** Runs the system folder picker, then links the chosen folder in [FolderRegistry] for the
+ * kinds the user chose before (D6), imported or in place. No UI of its own and no Compose, so
+ * apps whose UI is ImGui or JUCE can use it (§3.9). Start it with
  * [FolderRegistry.pickFolderIntent] from one of the app's own activities, never from a UI
  * another app is showing (§3.9, "Where setup happens").
  *
@@ -44,13 +45,13 @@ class SoundpackFolderPickerActivity : Activity() {
             return
         }
         val registry = FolderRegistry.get(this)
-        val requested = intent.getStringArrayExtra(FolderRegistry.EXTRA_KINDS)?.mapNotNull { SoundpackKind.builtIn(it) }?.toSet()
-        // Scanning can take a while for a large folder: not on the main thread.
+        val kinds = intent.getStringArrayExtra(FolderRegistry.EXTRA_KINDS)?.mapNotNull { SoundpackKind.builtIn(it) }?.toSet().orEmpty()
+        val import = intent.getBooleanExtra(FolderRegistry.EXTRA_IMPORT, false)
+        // Scanning, and importing even more, can take a while for a large folder: not on the main thread.
         thread(name = "soundpack-folder-link") {
             val result = try {
                 // The picker's grant is temporary until add() persists it; keep this process alive meanwhile.
-                val kinds = requested ?: registry.detectKinds(tree).filterValues { it > 0 }.keys.ifEmpty { registry.servedKinds().toSet() }
-                val folder = registry.add(tree, kinds)
+                val folder = registry.add(tree, kinds, import)
                 Intent().setData(tree)
                     .putExtra(FolderRegistry.EXTRA_FOLDER_ID, folder.id)
                     .putExtra(FolderRegistry.EXTRA_ENTRY_COUNTS, Bundle().apply {

@@ -34,7 +34,8 @@ import kotlin.random.Random
 
 /** The Phase 2 gate (docs/PLAN.md §6): with no hub installed, this app links folders through
  * the system picker, lists them, serves their files as regular descriptors, passes the
- * conformance suite, and scans a large folder once rather than on every open.
+ * conformance suite, and scans a large folder once rather than on every open. Folders are
+ * linked for the kinds chosen first (D6), and an imported folder is served from its copy.
  *
  * It drives the system folder picker with UiAutomator, in English. */
 @RunWith(AndroidJUnit4::class)
@@ -62,12 +63,13 @@ class EmbeddedFoldersTest {
     @Test
     fun linksServesAndListsAFolder() {
         TestSupport.writeSmallFolder(SMALL_NAME)
-        val result = TestSupport.pickFolder("Music/$SMALL_NAME")
+        val result = TestSupport.pickFolder("Music/$SMALL_NAME", kinds = setOf(SoundpackKind.SFZ, SoundpackKind.SF2))
         assertEquals("picker result: ${result.resultData?.getStringExtra(FolderRegistry.EXTRA_ERROR)}", Activity.RESULT_OK, result.resultCode)
         val folderId = result.resultData!!.getStringExtra(FolderRegistry.EXTRA_FOLDER_ID)!!
         val folder = registry.folder(folderId)!!
         assertEquals(FolderRegistry.packIdFor(folder.treeUri), folderId)
-        assertEquals("both kinds have entries, so both are detected", setOf(SoundpackKind.SFZ, SoundpackKind.SF2), folder.kinds)
+        assertEquals(setOf(SoundpackKind.SFZ, SoundpackKind.SF2), folder.kinds)
+        assertFalse("used in place unless imported", folder.imported)
         assertEquals(1, result.resultData!!.getBundleExtra(FolderRegistry.EXTRA_ENTRY_COUNTS)!!.getInt("sfz"))
 
         // SFZ: entries, hidden files, and regular-file descriptors with known lengths.
@@ -113,6 +115,48 @@ class EmbeddedFoldersTest {
             device.wait(Until.findObject(By.text("▶ Piano")), 5_000)!!.click()
             assertNotNull("and, inside its group, the entry", device.wait(Until.findObject(By.text("• piano")), 5_000))
         }
+    }
+
+    /** Linked for SFZ only and imported: the SoundFonts in it are not guessed into an SF2 pack,
+     * files open from the copy in this app's storage, and the copy outlives the folder. */
+    @Test
+    fun importedFolderServesItsCopy() {
+        TestSupport.writeSmallFolder(SMALL_NAME)
+        val result = TestSupport.pickFolder("Music/$SMALL_NAME", kinds = setOf(SoundpackKind.SFZ), import = true)
+        assertEquals("picker result: ${result.resultData?.getStringExtra(FolderRegistry.EXTRA_ERROR)}", Activity.RESULT_OK, result.resultCode)
+        val folderId = result.resultData!!.getStringExtra(FolderRegistry.EXTRA_FOLDER_ID)!!
+        val folder = registry.folder(folderId)!!
+        assertEquals(setOf(SoundpackKind.SFZ), folder.kinds)
+        assertTrue(folder.imported)
+        assertEquals(null, folder.importError)
+        val sf2 = SoundpackClient(context, SoundpackKind.SF2)
+        assertFalse("nothing is guessed from the content", sf2.catalog().packs.any { it.id == folderId })
+
+        val copy = File(context.noBackupFilesDir, "soundpack-imports/$folderId")
+        val sfz = SoundpackClient(context, SoundpackKind.SFZ)
+        fun readSample(): ByteArray {
+            val pack = sfz.catalog().packs.single { it.id == folderId }
+            return sfz.openFile(pack, "Piano/samples/a.wav").use { afd ->
+                val opened = File(Os.readlink("/proc/self/fd/${afd.parcelFileDescriptor.fd}"))
+                assertEquals("served from the copy", File(copy, "Piano/samples/a.wav").canonicalPath, opened.canonicalPath)
+                afd.createInputStream().use { it.readBytes() }
+            }
+        }
+        assertTrue(readSample().contentEquals(Random(1).nextBytes(TestSupport.SAMPLE_BYTES)))
+        ProviderConformance(context, SoundpackKind.SFZ.localAuthorityFor(context.packageName)).assertConforms()
+
+        // The folder is deleted: the copy keeps the pack available.
+        TestSupport.shell("rm -rf $SMALL")
+        registry.rescan(folderId)
+        val gone = registry.folder(folderId)!!
+        assertNotNull("the scan fails", gone.scanError)
+        assertTrue("but the copy is used", gone.available)
+        assertTrue(readSample().contentEquals(Random(1).nextBytes(TestSupport.SAMPLE_BYTES)))
+
+        // In place again: the copy is deleted, and with the folder gone, so is the pack.
+        assertFalse(registry.setImported(folderId, false).available)
+        assertFalse(copy.exists())
+        assertFalse(sfz.catalog().packs.any { it.id == folderId })
     }
 
     @Test

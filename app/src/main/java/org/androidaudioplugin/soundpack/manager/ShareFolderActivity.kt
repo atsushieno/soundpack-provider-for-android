@@ -15,9 +15,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,35 +35,29 @@ import org.androidaudioplugin.soundpack.host.FolderRegistry
 
 /** "Share with Soundpack Manager" (docs/PLAN.md §3.9): an app hands over a folder it linked.
  * The grant arrives with READ | PERSISTABLE | PREFIX in the ClipData (spike S6) and is
- * persisted when the user confirms. Sharing a folder widens who can read it, so the user picks
- * the kinds here (D2). The folder keeps its pack id, so apps that also link it locally still
- * see it once. */
+ * persisted when the user confirms. The kinds come from the app, where the user chose them
+ * before picking the folder (D6); nothing is guessed from the folder's content. Sharing widens
+ * who can read the folder, so the user confirms the kinds here, and chooses whether the Manager
+ * imports a copy or uses the folder in place. The folder keeps its pack id, so apps that also
+ * link it locally still see it once. */
 class ShareFolderActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val tree = intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
-        val proposed = intent.getStringArrayExtra(SoundpackContract.Hub.EXTRA_KINDS)?.mapNotNull { SoundpackKind.builtIn(it) }?.toSet().orEmpty()
+        val registry = FolderRegistry.get(this)
+        val served = registry.servedKinds()
+        val offered = intent.getStringArrayExtra(SoundpackContract.Hub.EXTRA_KINDS)?.mapNotNull { SoundpackKind.builtIn(it) }
+            ?.filter { it in served }?.toSet().orEmpty()
         val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) launchedFromPackage else referrer?.host
         val senderLabel = sender?.let { runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(it, 0)).toString() }.getOrNull() } ?: sender ?: "An app"
-        val registry = FolderRegistry.get(this)
         setResult(RESULT_CANCELED)
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
                     val scope = rememberCoroutineScope()
-                    var detected by remember { mutableStateOf<Map<SoundpackKind, Int>?>(null) }
-                    var chosen by remember { mutableStateOf(emptySet<SoundpackKind>()) }
+                    var chosen by remember { mutableStateOf(offered) }
+                    var import by remember { mutableStateOf(false) }
                     var status by remember { mutableStateOf<String?>(null) }
-                    LaunchedEffect(tree) {
-                        if (tree == null) return@LaunchedEffect
-                        try {
-                            val counts = withContext(Dispatchers.IO) { registry.detectKinds(tree) }
-                            detected = counts
-                            chosen = counts.filterValues { it > 0 }.keys.let { found -> if (proposed.isEmpty()) found else proposed.intersect(found).ifEmpty { found } }
-                        } catch (e: Exception) {
-                            status = "Cannot read that folder: ${e.message}"
-                        }
-                    }
                     Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (tree == null) {
                             Text("Nothing to share", style = MaterialTheme.typography.headlineSmall)
@@ -73,22 +67,28 @@ class ShareFolderActivity : ComponentActivity() {
                         val name = DocumentsContract.getTreeDocumentId(tree).substringAfterLast(':')
                         Text("Share $name with Soundpack Manager?", style = MaterialTheme.typography.headlineSmall)
                         Text("$senderLabel offers this folder. Every soundpack app will be able to read it, as the kinds below.")
-                        status?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        val counts = detected
-                        if (counts == null && status == null)
-                            Text("Looking at the folder…")
-                        counts?.forEach { (kind, count) ->
+                        // The app uses it as these kinds; without any, the user says what it is for.
+                        (if (offered.isEmpty()) served else offered).forEach { kind ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(checked = kind in chosen, onCheckedChange = { chosen = if (it) chosen + kind else chosen - kind })
-                                Text("${kind.id.uppercase()} ($count found)")
+                                Text(kind.id.uppercase())
                             }
                         }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = !import, onClick = { import = false })
+                            Text("Use it in place: no copy, slower loading")
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = import, onClick = { import = true })
+                            Text("Import a copy: loads fast and works without the folder, takes storage")
+                        }
+                        status?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(enabled = counts != null && chosen.isNotEmpty(), onClick = {
-                                status = "Sharing…"
+                            Button(enabled = chosen.isNotEmpty() && status == null, onClick = {
+                                status = if (import) "Importing… A large folder can take minutes." else "Sharing…"
                                 scope.launch {
                                     try {
-                                        withContext(Dispatchers.IO) { registry.add(tree, chosen) }
+                                        withContext(Dispatchers.IO) { registry.add(tree, chosen, import) }
                                         setResult(RESULT_OK)
                                         finish()
                                     } catch (e: Exception) {

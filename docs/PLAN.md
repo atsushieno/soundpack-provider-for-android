@@ -27,8 +27,9 @@ audio apps uniform, read-only access to sound content that lives outside the app
 - folders the user picked through the Storage Access Framework (SAF),
 
 Getting content onto the device is the user's business. They push it with ADB, copy it over
-MTP, or use a file manager. The host never uploads or copies content. It only **links** a
-folder that is already on the device, either in the hub or as a local folder inside an app.
+MTP, or use a file manager. The host never uploads content. It takes a folder that is already
+on the device, in the hub or as a local folder inside an app, and either **imports** it (a
+copy in the app's storage) or uses it **in place**; the user chooses per folder (D6).
 
 The point is that sfizz, usf2plugin, uapmd and future apps stop each owning a folder list,
 a SAF walker, a picker UI and a provider client. One content kind never shares a content
@@ -220,8 +221,8 @@ The URIs are tedious only if someone writes them by hand. Here nobody does:
   DX7 cartridges for dexed) follow the same convention with a reverse-DNS kind id. They need
   no change to the hub's protocol; the hub UI only needs to know their file patterns.
 
-Each kind has its own provider, so a folder shared only as SFZ is not served as JSFX or SF2
-(D2).
+Each kind has its own provider, so a folder linked only as SFZ is not served as JSFX or SF2
+(D6).
 
 ### 3.3 URI layout and columns (V1, provisional)
 
@@ -290,7 +291,7 @@ location it already has. Other path-only engines can use the same call.
   consented by picking the folder in that app.
 - **The hub's providers** are exported with no permission too (D5). Sharing a folder in the
   Soundpack Manager, or with it from an app ("Share with Soundpack Manager", §3.9), publishes
-  the folder to every soundpack app, as the kinds the user confirms (D2). There is no connect
+  the folder to every soundpack app, as the kinds it was linked for (D6). There is no connect
   step: an app reads the hub like any pack, and the hub is simply another source.
 
 S2 confirmed that a persistable prefix grant on the root of a custom provider works across
@@ -357,9 +358,21 @@ wiring (actions, authorities, `<meta-data>` names) stays under
 The folder machinery is written once, as a library. The hub and every embedding app run the
 same code; only the provider's exposure differs.
 
-- **Sources** are linked folders only: a persisted SAF tree grant, with the files left where
-  the user put them. Each folder is assigned to one or more kinds; see D2 for how. An
-  embedding app only offers the kinds it declared a local provider for.
+- **Sources** are linked folders only: a persisted SAF tree grant. The user chooses the kind
+  first and then picks a folder for it (D6); nothing is guessed from the folder's content,
+  and a folder can be linked again for another kind. An embedding app only offers the kinds
+  it declared a local provider for.
+- **Import or in place** (D6), per folder:
+  - An imported folder is copied to `noBackupFilesDir/soundpack-imports/<pack id>`, only what
+    its kinds serve: the whole tree for SFZ and JSFX, the entries for SF2. Its files then
+    open as plain files of the app, like an APK's assets, with no SAF on the load path.
+  - Every scan brings the copy up to date: new and changed files are copied, 4 at a time, and
+    removed ones are deleted. A file that cannot be copied is served from the folder, and the
+    folder shows why (no space, for example).
+  - When the folder can no longer be read, the copy keeps serving. Using the folder in place
+    again, or removing it, deletes the copy.
+  - A folder used in place keeps its files where the user put them, and every open goes
+    through SAF.
 - **Picker limits.** Since Android 11, the tree picker refuses the root of storage, the root
   of `Download`, and `Android/data`. The management UI therefore tells users to push content
   into a folder of its own, e.g. `adb push SoundFonts /sdcard/Music/SoundFonts`, and to link
@@ -378,9 +391,10 @@ same code; only the provider's exposure differs.
     second-guess it.
 - **UI-free host API.** host-core exposes folder management without any UI toolkit:
   - list folders, with their kinds, availability and counts;
-  - add a folder, through a plain (non-Compose) activity in host-core that only runs the
-    system folder picker and returns the result;
-  - remove a folder, which releases its grant;
+  - add a folder for kinds chosen first, imported or in place, through a plain (non-Compose)
+    activity in host-core that only runs the system folder picker and returns the result;
+  - switch a folder between imported and in place;
+  - remove a kind from a folder, or the folder, which deletes its copy and releases its grant;
   - set a folder's kinds;
   - rescan.
 
@@ -515,8 +529,10 @@ soundpack-provider-for-android/
   // soundpack_host.h: UI-free host API (embedded local folders, §3.9)
   soundpack_folder_list* soundpack_host_list_folders(void);
   //          soundpack_folder_count, _id, _display_name, _tree_uri, _kinds, _available,
-  //          _file_count, _error, soundpack_folder_list_free
+  //          _file_count, _error, _imported, soundpack_folder_list_free
   int  soundpack_host_add_folder(const char* tree_uri, const char* kinds, char* id_out, size_t id_len);
+  int  soundpack_host_import_folder(const char* tree_uri, const char* kinds, char* id_out, size_t id_len);
+  int  soundpack_host_set_imported(const char* folder_id, int imported);
   int  soundpack_host_remove_folder(const char* folder_id);
   int  soundpack_host_set_kinds(const char* folder_id, const char* kinds);    // "sf2,sfz"
   int  soundpack_host_rescan(const char* folder_id /* NULL: all */);
@@ -650,7 +666,7 @@ Status (2026-10-15): **gate passed** on the Galaxy Tab A11+ (Android 16). Built:
 
 - **`soundpack-host-core`** (no Compose, no Room, no coroutines):
   - `FolderRegistry`, the UI-free host API: list, detect kinds, add, set kinds, remove,
-    rescan, observe, and `pickFolderIntent`;
+    rescan, observe, and `pickFolderIntent` (kind detection was replaced by D6 in Phase 7);
   - the platform-SQLite `FolderIndex`, and the SAF `FolderScanner` (bounded walk, dot-files
     skipped, SF2 presets read at scan time, extensionless JSFX candidates confirmed by a
     `desc:` line);
@@ -658,7 +674,8 @@ Status (2026-10-15): **gate passed** on the Galaxy Tab A11+ (Android 16). Built:
     which refuse to start if exported;
   - `SoundpackFolderPickerActivity`, a plain activity that links in one step.
 - **`soundpack-host-ui`**: `SoundpackFoldersScreen` and `SoundpackFoldersActivity`, with the
-  D2 kind dialog (detected kinds pre-checked, a warning when nothing of the kind is found).
+  D2 kind dialog (detected kinds pre-checked, a warning when nothing of the kind is found;
+  replaced by D6 in Phase 7).
 - **`soundpack-ui-compose`**: `SoundpackPicker`, a tree of every readable pack, live.
 - **`samples/embedded-client`** declares local SFZ and SF2 providers. Its
   `EmbeddedFoldersTest` drives the system picker with UiAutomator, and both tests pass:
@@ -888,6 +905,81 @@ untouched.
   with unknown length, so APK packs would have to be served as pipes or materialised copies.
   Folder packs would pass through unchanged.
 
+Status (2026-10-16): **first-load latency measured**; the rest is not started.
+
+sfizz's `LoadLatencyTest` (aap-lv2-sfizz, device test) times six loads of one instrument per
+source, a second apart, each case in its own process. A load ends when sfizz has parsed the
+instrument and preloaded its samples; a note right after it must sound within eight blocks. For the
+pack app and the Manager, the first load also starts their process. Galaxy Tab A11+, warm page
+cache (dropping it needs root):
+
+| Instrument, source | First load | Later loads (median) |
+| --- | --- | --- |
+| Splendid Grand Piano (360 regions, 226 samples), file in app storage, as before soundpacks | 116 ms | 113 ms |
+| The same piano, soundpack from sfizz's own APK | 197 ms | 150 ms |
+| Salamander `ALL.sfz` (532 samples), soundpack from its pack app | 957 ms | 366 ms |
+| The same kit from a folder shared in the Soundpack Manager (SAF) | 3.8 s | 3.7 s |
+
+- A soundpack from an APK costs about 80 ms more than a file for the piano's first load, and
+  about 40 ms more later.
+- Starting a pack app's process, with the client's first use, adds about 600 ms to the first
+  load.
+- The folder is about ten times slower than the APK for the same kit. Opening 532 files through
+  the Manager's provider and SAF dominates, even 8 at a time.
+- **Fixed: every later load loaded the previous instrument again first.** The bridge's `load()`
+  calls sfizz's `set_resource_host()`, which reloaded the current selection whenever one was
+  set; it is there to complete a selection restored before a host existed. Each instrument
+  switch in the plugin UI paid the previous instrument's load time too: later loads took
+  278 ms, 684 ms and 8.0 s in the rows above. This came from the sfizz patch (`1b7c3f7`), not
+  from the soundpack migration. `sfizz-android.patch` now marks such a selection as pending
+  (`resource_pending`), and `set_resource_host()` loads only a pending one. sfizz's device
+  tests pass, including the restore across a process restart; no test covers completing a
+  pending selection.
+
+Kind first, then the folder, and import or in place (D6), 2026-10-16:
+
+- host-core: `FolderIndex` version 2 adds `imported` and `import_error`, migrated in place.
+  `FolderImports` keeps each imported folder's copy. `FolderProvider` serves imported files
+  from the copy, and answers file opens without the per-open entry statistics it used to
+  compute. provider-sdk gained `hasEntry()` for that.
+- host-ui, the Manager and the embedded sample list folders one kind at a time, with "Import
+  a folder" and "Use a folder in place". The Manager's share screen takes the kinds from the
+  app that shares, and asks whether to import.
+- Device tests on the Pixel 11 Pro Fold (Android 17), while the Galaxy Tab was away:
+  - the client suite (6) and the C API suite (4, now switching a folder to imported and back);
+  - `EmbeddedFoldersTest` (3), with the new `importedFolderServesItsCopy`: a folder linked as
+    SFZ only is not guessed into an SF2 pack; its files open from the copy; the copy keeps
+    serving after the folder is deleted; and using it in place again deletes the copy;
+  - `HubGateTest`, which now removes the shared folder from the Manager's SFZ and SF2 views.
+- Load times on the Pixel. The kit was copied from the Salamander repository to
+  `/sdcard/Music/SoundpackLatencyKit` and linked in sfizz through the picker
+  (`salamanderFromLinkedFolder`, in place and with `-e linkMode imported`). The Pixel's own
+  shared folder holds no Salamander kit, so the case through the Manager was skipped. Each
+  case ran in its own process, with the screen on:
+
+  | Instrument, source | First load | Later loads (median) | One open, alone / 8 at a time |
+  | --- | --- | --- | --- |
+  | Piano, file in app storage, as before soundpacks | 86 ms | 119 ms | — |
+  | Piano, soundpack from sfizz's own APK | 185 ms | 463 ms | — |
+  | Salamander `ALL.sfz`, from its pack app | 1051 ms | 673 ms | 3.64 / 0.56 ms |
+  | The same kit, sfizz's own folder, in place | 610 ms | 1002 ms | 23.10 / 1.58 ms |
+  | The same kit, sfizz's own folder, imported | 489 ms | 658 ms | 0.14 / 0.29 ms |
+
+  Importing the kit (550 files, 261 MB) took 1.0 s.
+- **Fixed while measuring: imported folders were slower than in place.** The first
+  measurement gave a median of 1.85 s imported, against 1.25 s in place and 0.67 s from the
+  APK. An imported file opened in 0.3 ms alone, but in 2.9 ms each 8 at a time: a local
+  provider runs in sfizz's process, and every open made four SQLite queries, which all 8
+  prefetch threads then waited on. `FolderProvider` now keeps each folder's files and
+  entries in memory. A write from the same process invalidates them at once
+  (`FolderIndex.writes`), and a write from another process within 250 ms
+  (`FolderIndex.stamp`, read without a cursor). An imported folder now loads like the APK.
+- **Open: later loads in sfizz's process are slower than the first** for the in-process
+  sources: the piano from sfizz's own APK goes from 185 ms to 463 ms, and the folder in place
+  from 610 ms to 1002 ms. The Galaxy Tab did not show this for the piano (197 ms, then 150 ms).
+  The cause is not known yet. The sessions sfizz opens are never closed, because the native
+  bridge drops a lazy snapshot without calling its `close()`; that is a candidate.
+
 
 7. Testing
 ----------
@@ -962,7 +1054,8 @@ untouched.
   `…soundpack.local.<kind>` provider (§3.9). The hub is an optional shared registry, and
   folders keep the same pack id wherever they are served (§3.7).
 
-- **D2. How a folder relates to kinds.** *Resolved 2026-10-15* as follows. This only matters
+- **D2. How a folder relates to kinds.** *Resolved 2026-10-15; superseded 2026-10-16 by D6,
+  except for the read scope and the share wording.* As resolved then; this only matters
   in the hub and in apps that embed more than one kind; in a single-kind app, every linked
   folder is that kind.
   - **The folder is the unit.** It is linked once and holds a set of kinds, so one scan
@@ -1008,5 +1101,24 @@ untouched.
   - This removes the consent screen, "Connected apps", `SoundpackClient.hubAccess()` and its
     connect calls, `SoundpackConnectActivity`, and the picker's connect button and setup
     hint. It also undoes the Phase 4 move of setup into `SfizzActivity`.
+- **D6. Kind first, then the folder; import or in place.** *Resolved 2026-10-16;* it
+  replaces D2's detection and the rule that the host never copies content.
+  - **The user chooses the kind, then picks the folder.** The folder is linked for that kind
+    only. Nothing is detected or pre-checked from its content, and no folder is walked before
+    it is linked. A folder can be linked again for another kind, as a deliberate step. File
+    types do not decide what a folder is for: the audio-sample kind planned for aap-core's
+    plugin manager (aap-core#165) accepts any audio file, so detection would offer every SFZ
+    folder as samples too, and index thousands of WAV and FLAC files nobody asked for.
+  - **Import or in place, per folder** (§3.9). Import copies what the folder's kinds serve
+    into the app's storage: it loads like an installed pack and keeps working without the
+    folder, but takes storage. In place keeps the files where they are, and every file open
+    goes through SAF and FUSE, about 6 ms each even 8 at a time; a 532-sample kit loaded about
+    ten times slower than the same kit from an APK (Phase 7).
+  - D2's per-kind read scope and share wording stay.
+  - The UIs list folders one kind at a time, with "Import a folder" and "Use a folder in
+    place". `FolderRegistry` has `add(tree, kinds, import)`, `setImported` and `removeKind`;
+    `detectKinds` and the kinds dialog are gone. The C API adds
+    `soundpack_host_import_folder`, `soundpack_host_set_imported` and
+    `soundpack_folder_imported`; the existing functions are unchanged.
 
 All decisions are settled.

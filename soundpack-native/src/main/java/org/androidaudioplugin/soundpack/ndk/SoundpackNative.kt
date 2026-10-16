@@ -24,7 +24,7 @@ internal object SoundpackNative {
     /** Fields per entry in [listEntries]. */
     private const val ENTRY_FIELDS = 6
     /** Fields per folder in [hostFolders]. */
-    private const val FOLDER_FIELDS = 7
+    private const val FOLDER_FIELDS = 8
 
     private fun pack(values: List<String>): ByteArray = ByteArrayOutputStream().apply {
         for (value in values) {
@@ -114,17 +114,23 @@ internal object SoundpackNative {
     }
 
     /** Every linked folder: id, display name, tree URI, kinds ("sf2,sfz"), "1" when available
-     * else "0", file count, and the last scan error ("" when none). */
+     * else "0", file count, the last scan error ("" when none), and "1" when imported else "0". */
     @JvmStatic
     fun hostFolders(): ByteArray = pack(FolderRegistry.get(context).folders().flatMap { folder ->
         listOf(folder.id, folder.displayName, folder.treeUri.toString(), folder.kinds.joinToString(",") { it.id },
-            if (folder.available) "1" else "0", folder.fileCount.toString(), folder.scanError.orEmpty())
+            if (folder.available) "1" else "0", folder.fileCount.toString(), folder.scanError.orEmpty(),
+            if (folder.imported) "1" else "0")
     })
 
-    /** Links (and scans) a folder the app holds a grant on; returns its id. */
+    /** Links (and scans, and with [import] copies) a folder the app holds a grant on; returns its id. */
     @JvmStatic
-    fun hostAddFolder(treeUri: ByteArray, kindList: ByteArray): ByteArray =
-        FolderRegistry.get(context).add(Uri.parse(string(treeUri)), kinds(string(kindList))).id.toByteArray(Charsets.UTF_8)
+    fun hostAddFolder(treeUri: ByteArray, kindList: ByteArray, import: Boolean): ByteArray =
+        FolderRegistry.get(context).add(Uri.parse(string(treeUri)), kinds(string(kindList)), import).id.toByteArray(Charsets.UTF_8)
+
+    @JvmStatic
+    fun hostSetImported(id: ByteArray, imported: Boolean) {
+        FolderRegistry.get(context).setImported(string(id), imported)
+    }
 
     @JvmStatic
     fun hostRemoveFolder(id: ByteArray) = FolderRegistry.get(context).remove(string(id))

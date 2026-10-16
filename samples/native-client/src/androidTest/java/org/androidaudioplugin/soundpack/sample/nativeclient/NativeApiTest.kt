@@ -34,7 +34,7 @@ class NativeApiTest {
 
     private fun entries(kind: String) = NativeClient.listEntries(kind).toList().chunked(6)
 
-    private fun folders() = NativeClient.folders().toList().chunked(7)
+    private fun folders() = NativeClient.folders().toList().chunked(8)
 
     private fun sinesIdentity() = entries("sf2")
         .single { it[0].contains("/org.androidaudioplugin.soundpack.sample.sines/") && it[2] == "Sines.sf2" }[0]
@@ -114,6 +114,7 @@ class NativeApiTest {
         assertEquals("sf2", folder[3])
         assertEquals("1", folder[4])
         assertEquals(2, folder[5].toInt())
+        assertEquals("used in place", "0", folder[7])
 
         // Its SF2s are entries now, presets included, without the app opening them.
         val local = entries("sf2").filter { it[0].contains("/$folderId/") }
@@ -126,6 +127,13 @@ class NativeApiTest {
 
         assertEquals(NativeClient.lastError(), 0, NativeClient.rescan(folderId))
         assertEquals(0, NativeClient.rescan(null))
+
+        // Imported, it is served from a copy, and the same identity still opens.
+        assertEquals(NativeClient.lastError(), 0, NativeClient.setImported(folderId!!, true))
+        assertEquals("1", folders().single { it[0] == folderId }[7])
+        assertEquals("RIFF", NativeClient.describe(built)!![3].substring(0, 4))
+        assertEquals(0, NativeClient.setImported(folderId!!, false))
+        assertEquals("0", folders().single { it[0] == folderId }[7])
 
         assertEquals(0, NativeClient.removeFolder(folderId!!))
         assertFalse(folders().any { it[0] == folderId })

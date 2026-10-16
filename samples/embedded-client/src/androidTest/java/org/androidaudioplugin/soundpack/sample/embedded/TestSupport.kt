@@ -51,11 +51,12 @@ internal object TestSupport {
         shell("rm -rf /sdcard/Music/$name", "cp -r ${stage.absolutePath} /sdcard/Music/$name")
     }
 
-    /** Runs [SoundpackFolderPickerActivity] and answers the system picker as a user would. */
-    fun pickFolder(path: String, kinds: Set<SoundpackKind>? = null): Instrumentation.ActivityResult {
+    /** Runs [SoundpackFolderPickerActivity] for [kinds], chosen first as a user would (D6), and
+     * answers the system picker. */
+    fun pickFolder(path: String, kinds: Set<SoundpackKind>, import: Boolean = false): Instrumentation.ActivityResult {
         val registry = FolderRegistry.get(context)
         val initial = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$path")
-        val scenario = ActivityScenario.launchActivityForResult<SoundpackFolderPickerActivity>(registry.pickFolderIntent(kinds, initial))
+        val scenario = ActivityScenario.launchActivityForResult<SoundpackFolderPickerActivity>(registry.pickFolderIntent(kinds, import, initial))
         device.wait(Until.findObject(By.text(Pattern.compile("(?i)use this folder"))), 20_000)!!.click()
         device.wait(Until.findObject(By.text(Pattern.compile("(?i)allow"))), 10_000)!!.click()
         return scenario.result

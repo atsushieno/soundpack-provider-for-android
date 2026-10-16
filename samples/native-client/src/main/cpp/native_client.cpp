@@ -115,10 +115,15 @@ extern "C" JNIEXPORT jobjectArray JNICALL NATIVE_CLIENT(folders)(JNIEnv* env, jc
             fields.emplace_back(soundpack_folder_available(list, i) ? "1" : "0");
             fields.emplace_back(std::to_string(soundpack_folder_file_count(list, i)));
             fields.emplace_back(soundpack_folder_error(list, i));
+            fields.emplace_back(soundpack_folder_imported(list, i) ? "1" : "0");
         }
         soundpack_folder_list_free(list);
     }
     return toArray(env, fields);
+}
+
+extern "C" JNIEXPORT jint JNICALL NATIVE_CLIENT(setImported)(JNIEnv* env, jclass, jstring id, jboolean imported) {
+    return soundpack_host_set_imported(text(env, id).c_str(), imported ? 1 : 0);
 }
 
 extern "C" JNIEXPORT jint JNICALL NATIVE_CLIENT(removeFolder)(JNIEnv* env, jclass, jstring id) {

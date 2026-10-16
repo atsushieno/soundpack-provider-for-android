@@ -76,8 +76,12 @@ abstract class SoundpackProvider(val kind: SoundpackKind) : ContentProvider() {
         context?.contentResolver?.notifyChange(uri, null)
     }
 
-    /** Looks up one pack; override when listing every pack is expensive. */
+    /** Looks up one pack; override when listing every pack is expensive. File and entry
+     * requests use it, and none of them reads [PackRecord.fileCount] or [PackRecord.totalBytes]. */
     protected open fun pack(packId: String): PackRecord? = packs().firstOrNull { it.id == packId }
+
+    /** Whether [path] is an entry of [pack]; override when listing every entry is expensive. */
+    protected open fun hasEntry(pack: PackRecord, path: String): Boolean = entries(pack).any { it.path == path }
 
     private fun visibleFiles(pack: PackRecord): List<FileRecord> {
         val files = files(pack).filter { !PackPath.isHidden(it.path) }
@@ -130,7 +134,7 @@ abstract class SoundpackProvider(val kind: SoundpackKind) : ContentProvider() {
             ?: throw FileNotFoundException("Invalid path: ${route.path}")
         if (PackPath.isHidden(path))
             throw FileNotFoundException(path)
-        if (kind.readScope == SoundpackKind.ReadScope.ENTRIES_ONLY && entries(pack).none { it.path == path })
+        if (kind.readScope == SoundpackKind.ReadScope.ENTRIES_ONLY && !hasEntry(pack, path))
             throw FileNotFoundException("$path is not an entry; ${kind.id} packs serve only their entries")
         return regularWithLength(openPackFile(pack, path), path)
     }

@@ -19,7 +19,7 @@ static jclass bridge;
 static size_t entry_fields;
 static size_t folder_fields;
 static jmethodID m_format_identity, m_list_entries, m_open, m_session_info, m_open_fd, m_prefetch, m_close, m_materialize;
-static jmethodID m_host_folders, m_host_add_folder, m_host_remove_folder, m_host_set_kinds, m_host_rescan;
+static jmethodID m_host_folders, m_host_add_folder, m_host_remove_folder, m_host_set_kinds, m_host_rescan, m_host_set_imported;
 
 static __thread char last_error[512];
 
@@ -191,7 +191,8 @@ int soundpack_init(JNIEnv* env, jobject context) {
     STATIC_METHOD(m_close, "close", "(Ljava/lang/Object;)V")
     STATIC_METHOD(m_materialize, "materialize", "([B[B[B)[I")
     STATIC_METHOD(m_host_folders, "hostFolders", "()[B")
-    STATIC_METHOD(m_host_add_folder, "hostAddFolder", "([B[B)[B")
+    STATIC_METHOD(m_host_add_folder, "hostAddFolder", "([B[BZ)[B")
+    STATIC_METHOD(m_host_set_imported, "hostSetImported", "([BZ)V")
     STATIC_METHOD(m_host_remove_folder, "hostRemoveFolder", "([B)V")
     STATIC_METHOD(m_host_set_kinds, "hostSetKinds", "([B[B)V")
     STATIC_METHOD(m_host_rescan, "hostRescan", "([B)V")
@@ -506,6 +507,7 @@ const char* soundpack_folder_kinds(const soundpack_folder_list* l, size_t i) { r
 int soundpack_folder_available(const soundpack_folder_list* l, size_t i) { return strcmp(field_at(l ? &l->table : NULL, folder_fields, i, 4), "1") == 0; }
 int soundpack_folder_file_count(const soundpack_folder_list* l, size_t i) { return atoi(field_at(l ? &l->table : NULL, folder_fields, i, 5)); }
 const char* soundpack_folder_error(const soundpack_folder_list* l, size_t i) { return field_at(l ? &l->table : NULL, folder_fields, i, 6); }
+int soundpack_folder_imported(const soundpack_folder_list* l, size_t i) { return strcmp(field_at(l ? &l->table : NULL, folder_fields, i, 7), "1") == 0; }
 
 void soundpack_folder_list_free(soundpack_folder_list* list) {
     if (!list)
@@ -514,7 +516,7 @@ void soundpack_folder_list_free(soundpack_folder_list* list) {
     free(list);
 }
 
-int soundpack_host_add_folder(const char* tree_uri, const char* kinds, char* id_out, size_t id_len) {
+static int add_folder(const char* tree_uri, const char* kinds, jboolean import, char* id_out, size_t id_len) {
     if (!tree_uri || !kinds) {
         set_error("Invalid arguments");
         return -1;
@@ -525,9 +527,32 @@ int soundpack_host_add_folder(const char* tree_uri, const char* kinds, char* id_
     JNIEnv* env = scope.env;
     int result = -1;
     jbyteArray id = (jbyteArray) (*env)->CallStaticObjectMethod(env, bridge, m_host_add_folder,
-        bytes_of(env, tree_uri), bytes_of(env, kinds));
-    if (!failed(env, "Linking a folder") && id)
+        bytes_of(env, tree_uri), bytes_of(env, kinds), import);
+    if (!failed(env, import ? "Importing a folder" : "Linking a folder") && id)
         result = id_out ? copy_out(env, id, id_out, id_len, "The folder id") : 0;
+    scope_leave(&scope);
+    return result;
+}
+
+int soundpack_host_add_folder(const char* tree_uri, const char* kinds, char* id_out, size_t id_len) {
+    return add_folder(tree_uri, kinds, JNI_FALSE, id_out, id_len);
+}
+
+int soundpack_host_import_folder(const char* tree_uri, const char* kinds, char* id_out, size_t id_len) {
+    return add_folder(tree_uri, kinds, JNI_TRUE, id_out, id_len);
+}
+
+int soundpack_host_set_imported(const char* folder_id, int imported) {
+    if (!folder_id) {
+        set_error("Invalid arguments");
+        return -1;
+    }
+    jni_scope scope;
+    if (scope_enter(&scope))
+        return -1;
+    JNIEnv* env = scope.env;
+    (*env)->CallStaticVoidMethod(env, bridge, m_host_set_imported, bytes_of(env, folder_id), imported ? JNI_TRUE : JNI_FALSE);
+    int result = failed(env, imported ? "Importing a folder" : "Using a folder in place") ? -1 : 0;
     scope_leave(&scope);
     return result;
 }

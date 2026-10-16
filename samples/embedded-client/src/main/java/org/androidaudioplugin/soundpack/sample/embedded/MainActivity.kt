@@ -78,8 +78,11 @@ private fun SampleScreen() {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { context.startActivity(Intent(context, SoundpackFoldersActivity::class.java)) }) { Text("Manage folders") }
-            OutlinedButton(onClick = { link.launch(registry.pickFolderIntent()) }) { Text("Link folder (UI-free)") }
+            Button(onClick = {
+                context.startActivity(Intent(context, SoundpackFoldersActivity::class.java).putExtra(FolderRegistry.EXTRA_KINDS, arrayOf(kind.id)))
+            }) { Text("Manage folders") }
+            // The kind chosen above, then the folder (D6).
+            OutlinedButton(onClick = { link.launch(registry.pickFolderIntent(setOf(kind))) }) { Text("Link ${kind.id.uppercase()} folder (UI-free)") }
         }
         linkResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         SoundpackPicker(client, selected?.let { client.identityOf(it) }, onSelect = { selected = it }, Modifier.weight(1f).fillMaxWidth())

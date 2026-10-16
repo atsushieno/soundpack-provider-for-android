@@ -56,7 +56,7 @@ class HubGateTest {
         val hubSf2 = sf2.hubEndpoint()!!.authority
 
         TestSupport.writeSmallFolder(NAME)
-        val linked = TestSupport.pickFolder("Music/$NAME")
+        val linked = TestSupport.pickFolder("Music/$NAME", kinds = setOf(SoundpackKind.SFZ, SoundpackKind.SF2))
         assertEquals(Activity.RESULT_OK, linked.resultCode)
         val folderId = linked.resultData!!.getStringExtra(FolderRegistry.EXTRA_FOLDER_ID)!!
 
@@ -65,8 +65,8 @@ class HubGateTest {
         hubPackIds(hubSf2)
         assertTrue(sfz.catalog().failures.none { it.endpoint.authority == hubSfz })
 
-        // Share the folder with the hub, as the folder screen's button does; the hub asks which
-        // kinds, and both are detected.
+        // Share the folder with the hub, as the folder screen's button does; the hub confirms the
+        // kinds it is linked as here, and uses it in place by default.
         context.startActivity(registry.shareWithHubIntent(folderId)!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         device.wait(Until.findObject(By.text("Share").enabled(true)), 30_000)!!.click()
         TestSupport.waitFor(description = "the hub to serve the shared folder") { hubPackIds(hubSfz).takeIf { folderId in it } }
@@ -92,10 +92,16 @@ class HubGateTest {
         context.startActivity(context.packageManager.getLaunchIntentForPackage(SoundpackContract.Hub.PACKAGE)!!
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         device.wait(Until.findObject(By.text("Folders")), 15_000)!!.click()
-        device.wait(Until.findObject(By.scrollable(true)), 10_000)?.scrollUntil(Direction.DOWN, Until.findObject(By.text(NAME)))
-        device.wait(Until.findObject(By.hasChild(By.text(NAME))), 10_000)!!.findObject(By.text("Remove")).click()
-        device.wait(Until.gone(By.text(NAME)), 10_000)
-        TestSupport.waitFor(description = "the hub to stop serving the folder") { (folderId !in hubPackIds(hubSfz)).takeIf { it } }
+        // The hub lists folders one kind at a time; remove it as SFZ, then as SF2.
+        for (kind in listOf("SFZ", "SF2")) {
+            device.wait(Until.findObject(By.text(kind)), 10_000)!!.click()
+            device.wait(Until.findObject(By.scrollable(true)), 10_000)?.scrollUntil(Direction.DOWN, Until.findObject(By.text(NAME)))
+            device.wait(Until.findObject(By.hasChild(By.text(NAME))), 10_000)!!.findObject(By.text("Remove")).click()
+            device.wait(Until.gone(By.text(NAME)), 10_000)
+        }
+        TestSupport.waitFor(description = "the hub to stop serving the folder") {
+            (folderId !in hubPackIds(hubSfz) && folderId !in hubPackIds(hubSf2)).takeIf { it }
+        }
     }
 
     /** Opt-in, because it uninstalls the hub: run with `-e allowHubUninstall true`, then
@@ -105,7 +111,7 @@ class HubGateTest {
         assumeTrue("Uninstalls the hub; run with -e allowHubUninstall true",
             InstrumentationRegistry.getArguments().getString("allowHubUninstall") == "true")
         TestSupport.writeSmallFolder(NAME)
-        val folderId = TestSupport.pickFolder("Music/$NAME").resultData!!.getStringExtra(FolderRegistry.EXTRA_FOLDER_ID)!!
+        val folderId = TestSupport.pickFolder("Music/$NAME", kinds = setOf(SoundpackKind.SFZ)).resultData!!.getStringExtra(FolderRegistry.EXTRA_FOLDER_ID)!!
 
         TestSupport.shell("pm uninstall ${SoundpackContract.Hub.PACKAGE}")
         TestSupport.waitFor(description = "the hub to disappear") { (sfz.hubEndpoint() == null).takeIf { it } }

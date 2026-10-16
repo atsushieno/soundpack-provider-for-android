@@ -22,8 +22,10 @@ object NativeClient {
     /** The new folder's id, or null on failure. */
     @JvmStatic external fun addFolder(treeUri: String, kinds: String): String?
 
-    /** Seven fields per folder: id, name, tree URI, kinds, available ("1"/"0"), file count, error. */
+    /** Eight fields per folder: id, name, tree URI, kinds, available ("1"/"0"), file count,
+     * error, imported ("1"/"0"). */
     @JvmStatic external fun folders(): Array<String>
+    @JvmStatic external fun setImported(id: String, imported: Boolean): Int
     @JvmStatic external fun removeFolder(id: String): Int
     @JvmStatic external fun rescan(id: String?): Int
 }

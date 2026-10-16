@@ -3,8 +3,11 @@ package org.androidaudioplugin.soundpack.host
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
+import android.database.DatabaseUtils
+import android.database.sqlite.SQLiteDoneException
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import java.util.concurrent.atomic.AtomicLong
 
 /** The index of linked folders: what each folder holds, as of its last scan. Providers answer
  * from here, so a folder is walked once per scan, not on every request (docs/PLAN.md §3.9).
@@ -22,6 +25,10 @@ internal class FolderIndex private constructor(context: Context) :
         val scanError: String?,
         val fileCount: Int,
         val totalBytes: Long,
+        /** Served from a copy in app storage, not from the folder itself. */
+        val imported: Boolean,
+        /** Why the last copy of an imported folder is incomplete; null when it is complete. */
+        val importError: String?,
     )
 
     class FileRow(val path: String, val documentId: String, val size: Long, val lastModified: Long)
@@ -39,7 +46,9 @@ internal class FolderIndex private constructor(context: Context) :
             scanned_at INTEGER NOT NULL DEFAULT 0,
             scan_error TEXT,
             file_count INTEGER NOT NULL DEFAULT 0,
-            total_bytes INTEGER NOT NULL DEFAULT 0)""")
+            total_bytes INTEGER NOT NULL DEFAULT 0,
+            imported INTEGER NOT NULL DEFAULT 0,
+            import_error TEXT)""")
         db.execSQL("""CREATE TABLE files (
             folder_id TEXT NOT NULL,
             path TEXT NOT NULL,
@@ -58,33 +67,62 @@ internal class FolderIndex private constructor(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Version 1 only. Later versions migrate here; the index can always be rebuilt by a
-        // rescan, but the folder list (and its grants) must survive.
+        // The index can always be rebuilt by a rescan, but the folder list (and its grants)
+        // must survive.
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE folders ADD COLUMN imported INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE folders ADD COLUMN import_error TEXT")
+        }
     }
 
     fun folders(): List<FolderRow> = readableDatabase.query("folders", null, null, null, null, null, "display_name, id")
         .use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.toFolder()) } }
 
+    private val writeCount = AtomicLong()
+
+    /** Moves after every write from this process, so that a reader can tell that it changed
+     * without a query; writes from other processes show in [stamp]. */
+    val writes: Long get() = writeCount.get()
+
     fun folder(id: String): FolderRow? = readableDatabase.query("folders", null, "id = ?", arrayOf(id), null, null, null)
         .use { if (it.moveToFirst()) it.toFolder() else null }
 
-    fun insertFolder(id: String, treeUri: String, displayName: String, kinds: Collection<String>) {
+    fun insertFolder(id: String, treeUri: String, displayName: String, kinds: Collection<String>, imported: Boolean) {
         writableDatabase.insertWithOnConflict("folders", null, ContentValues().apply {
             put("id", id)
             put("tree_uri", treeUri)
             put("display_name", displayName)
             put("kinds", kinds.sorted().joinToString(" "))
+            put("imported", if (imported) 1 else 0)
         }, SQLiteDatabase.CONFLICT_IGNORE)
+        writeCount.incrementAndGet()
+    }
+
+    fun setImported(id: String, imported: Boolean) {
+        writableDatabase.update("folders", ContentValues().apply {
+            put("imported", if (imported) 1 else 0)
+            putNull("import_error")
+        }, "id = ?", arrayOf(id))
+        writeCount.incrementAndGet()
+    }
+
+    fun setImportError(id: String, error: String?) {
+        writableDatabase.update("folders", ContentValues().apply { if (error == null) putNull("import_error") else put("import_error", error) },
+            "id = ?", arrayOf(id))
     }
 
     fun setKinds(id: String, kinds: Collection<String>) {
         writableDatabase.update("folders", ContentValues().apply { put("kinds", kinds.sorted().joinToString(" ")) }, "id = ?", arrayOf(id))
+        writeCount.incrementAndGet()
     }
 
-    fun deleteFolder(id: String) = writableDatabase.transaction {
-        delete("entries", "folder_id = ?", arrayOf(id))
-        delete("files", "folder_id = ?", arrayOf(id))
-        delete("folders", "id = ?", arrayOf(id))
+    fun deleteFolder(id: String) {
+        writableDatabase.transaction {
+            delete("entries", "folder_id = ?", arrayOf(id))
+            delete("files", "folder_id = ?", arrayOf(id))
+            delete("folders", "id = ?", arrayOf(id))
+        }
+        writeCount.incrementAndGet()
     }
 
     fun contentHash(id: String): String? =
@@ -126,13 +164,14 @@ internal class FolderIndex private constructor(context: Context) :
                 "file_count = ?, total_bytes = ?, revision = revision + ? WHERE id = ?",
                 arrayOf<Any>(displayName, contentHash, scannedAt, files.size, files.sumOf { it.size }, if (changed) 1 else 0, id))
             changed
-        }
+        }.also { writeCount.incrementAndGet() }
 
     fun setScanError(id: String, error: String, scannedAt: Long) {
         writableDatabase.update("folders", ContentValues().apply {
             put("scan_error", error)
             put("scanned_at", scannedAt)
         }, "id = ?", arrayOf(id))
+        writeCount.incrementAndGet()
     }
 
     fun files(folderId: String): List<FileRow> =
@@ -154,6 +193,16 @@ internal class FolderIndex private constructor(context: Context) :
             }
         }
 
+    /** Changes whenever what a provider serves from the folder changes: its content (the
+     * revision, which also moves with its kinds), import mode or availability. Null when the
+     * folder is gone. Read without a cursor, so it is cheap on the file-open path. */
+    fun stamp(folderId: String): Long? = try {
+        DatabaseUtils.longForQuery(readableDatabase,
+            "SELECT revision * 4 + imported * 2 + (scan_error IS NULL) FROM folders WHERE id = ?", arrayOf(folderId))
+    } catch (_: SQLiteDoneException) {
+        null
+    }
+
     /** Total size of the files a provider of [kind] serves from [folderId]: all files, or only
      * the entries for an entries-only kind. */
     fun entryStats(folderId: String, kind: String): Pair<Int, Long> =
@@ -171,6 +220,8 @@ internal class FolderIndex private constructor(context: Context) :
         scanError = getColumnIndexOrThrow("scan_error").let { if (isNull(it)) null else getString(it) },
         fileCount = getInt(getColumnIndexOrThrow("file_count")),
         totalBytes = getLong(getColumnIndexOrThrow("total_bytes")),
+        imported = getInt(getColumnIndexOrThrow("imported")) != 0,
+        importError = getColumnIndexOrThrow("import_error").let { if (isNull(it)) null else getString(it) },
     )
 
     private inline fun <T> SQLiteDatabase.transaction(block: SQLiteDatabase.() -> T): T {
@@ -183,7 +234,7 @@ internal class FolderIndex private constructor(context: Context) :
     }
 
     companion object {
-        private const val VERSION = 1
+        private const val VERSION = 2
 
         @Volatile
         private var instance: FolderIndex? = null

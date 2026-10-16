@@ -26,6 +26,7 @@ class FolderRegistry private constructor(context: Context) {
     private val context: Context = context.applicationContext
     private val index = FolderIndex.get(this.context)
     private val scanner = FolderScanner(this.context.contentResolver)
+    private val imports = FolderImports(this.context)
     private val scanLock = Any()
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "soundpack-folder-scan").apply { isDaemon = true } }
     private val startupScanDone = AtomicBoolean(false)
@@ -45,8 +46,15 @@ class FolderRegistry private constructor(context: Context) {
         val scanError: String?,
         val fileCount: Int,
         val totalBytes: Long,
+        /** Imported: served from a copy in this app's storage, which follows the folder on each
+         * scan. Otherwise the folder is used in place, through SAF. */
+        val imported: Boolean,
+        /** Why the copy of an imported folder is incomplete; its missing files are served from
+         * the folder meanwhile. */
+        val importError: String?,
     ) {
-        val available: Boolean get() = scanError == null
+        /** An imported folder stays available from its copy when the folder itself is gone. */
+        val available: Boolean get() = scanError == null || imported
     }
 
     /** How many times a folder has been walked in this process; for diagnostics and tests. */
@@ -73,16 +81,12 @@ class FolderRegistry private constructor(context: Context) {
     /** How many entries [kind] has in the folder, as of its last scan. */
     fun entryCount(id: String, kind: SoundpackKind): Int = index.entryStats(id, kind.id).first
 
-    /** Walks [tree] and counts the entries each served kind would find, so a UI can pre-check
-     * the kinds that have any (D2). Does not register anything. */
-    fun detectKinds(tree: Uri): Map<SoundpackKind, Int> {
-        val scan = scanner.scan(tree).also { walks.incrementAndGet() }
-        return servedKinds().associateWith { kind -> scan.files.count { scanner.isEntry(tree, kind, it) } }
-    }
-
-    /** Links [tree] for [kinds] and scans it. The app must hold a grant from the system folder
-     * picker; it is made persistent here. Adding a folder again adds kinds to it. */
-    fun add(tree: Uri, kinds: Set<SoundpackKind>): Folder {
+    /** Links [tree] for [kinds] and scans it, and with [import], copies what those kinds serve
+     * into this app's storage. The user chooses the kinds first and then picks the folder (D6):
+     * nothing is guessed from the folder's content. The app must hold a grant from the system
+     * folder picker; it is made persistent here. Adding a folder again adds kinds to it, and
+     * [import] then applies to the whole folder. */
+    fun add(tree: Uri, kinds: Set<SoundpackKind>, import: Boolean = false): Folder {
         require(DocumentsContract.isTreeUri(tree)) { "Not a folder (tree) URI: $tree" }
         val served = servedKinds()
         require(kinds.isNotEmpty() && served.containsAll(kinds)) { "This app serves $served from folders; asked for $kinds" }
@@ -90,9 +94,12 @@ class FolderRegistry private constructor(context: Context) {
         val id = packIdFor(tree)
         val existing = index.folder(id)
         if (existing == null)
-            index.insertFolder(id, tree.toString(), scanner.displayName(tree), kinds.map { it.id })
-        else
+            index.insertFolder(id, tree.toString(), scanner.displayName(tree), kinds.map { it.id }, import)
+        else {
             index.setKinds(id, existing.kinds.toSet() + kinds.map { it.id })
+            if (existing.imported != import)
+                setImportedRow(id, import)
+        }
         scan(id)
         notifyChanged()
         return requireNotNull(folder(id))
@@ -108,13 +115,41 @@ class FolderRegistry private constructor(context: Context) {
         return requireNotNull(folder(id))
     }
 
-    /** Unlinks the folder and gives its grant back. Saved identities pointing into it become
-     * unavailable (or resolve through the hub, if the hub has the same folder). */
+    /** Stops using the folder as [kind]; the folder is removed when no kind is left. */
+    fun removeKind(id: String, kind: SoundpackKind) {
+        val row = index.folder(id) ?: return
+        val kinds = row.kinds.mapNotNull { SoundpackKind.builtIn(it) }.toSet() - kind
+        if (kinds.isEmpty())
+            remove(id)
+        else
+            setKinds(id, kinds)
+    }
+
+    /** Switches the folder between imported (copied into this app's storage) and in place.
+     * Importing copies it now, which can take long for a large folder. */
+    fun setImported(id: String, imported: Boolean): Folder {
+        requireNotNull(index.folder(id)) { "No folder $id" }
+        setImportedRow(id, imported)
+        scan(id)
+        notifyChanged()
+        return requireNotNull(folder(id))
+    }
+
+    private fun setImportedRow(id: String, imported: Boolean) = synchronized(scanLock) {
+        index.setImported(id, imported)
+        if (!imported)
+            imports.delete(id)
+    }
+
+    /** Unlinks the folder, deletes its imported copy and gives its grant back. Saved
+     * identities pointing into it become unavailable (or resolve through the hub, if the hub
+     * has the same folder). */
     fun remove(id: String) {
         // Wait for a running scan, so that it cannot write files into a removed folder.
         val row = synchronized(scanLock) {
             val row = index.folder(id) ?: return
             index.deleteFolder(id)
+            imports.delete(id)
             row
         }
         runCatching { context.contentResolver.releasePersistableUriPermission(Uri.parse(row.treeUri), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -168,13 +203,15 @@ class FolderRegistry private constructor(context: Context) {
         return AutoCloseable { context.contentResolver.unregisterContentObserver(observer) }
     }
 
-    /** An intent for [SoundpackFolderPickerActivity]: the system picker, then registration.
-     * Without [kinds], the kinds the folder has entries for are used. Start it from one of your own activities in the foreground. Never start it from a UI
-     * that another app is showing (an AAP plugin UI in a host): Android blocks that, and the
-     * design does not ask hosts to lift it (docs/PLAN.md §3.9, "Where setup happens"). */
-    fun pickFolderIntent(kinds: Set<SoundpackKind>? = null, initialUri: Uri? = null): Intent =
+    /** An intent for [SoundpackFolderPickerActivity]: the system picker, then linking for
+     * [kinds], which the user chose before (D6), imported or in place. Start it from one of
+     * your own activities in the foreground. Never start it from a UI that another app is
+     * showing (an AAP plugin UI in a host): Android blocks that, and the design does not ask
+     * hosts to lift it (docs/PLAN.md §3.9, "Where setup happens"). */
+    fun pickFolderIntent(kinds: Set<SoundpackKind>, import: Boolean = false, initialUri: Uri? = null): Intent =
         Intent(context, SoundpackFolderPickerActivity::class.java).apply {
-            kinds?.let { putExtra(EXTRA_KINDS, it.map(SoundpackKind::id).toTypedArray()) }
+            putExtra(EXTRA_KINDS, kinds.map(SoundpackKind::id).toTypedArray())
+            putExtra(EXTRA_IMPORT, import)
             initialUri?.let { putExtra(EXTRA_INITIAL_URI, it) }
         }
 
@@ -222,13 +259,26 @@ class FolderRegistry private constructor(context: Context) {
                 unchanged.mapNotNull { previous[it.path] } + scanner.entries(tree, kind, changed)
             }
             val hash = scan.contentHash + "|" + row.kinds.sorted().joinToString(" ")
-            index.replaceContent(id, scan.displayName, scan.files, entries, hash, now) || row.scanError != null
+            val changed = index.replaceContent(id, scan.displayName, scan.files, entries, hash, now) || row.scanError != null
+            if (row.imported && index.folder(id) != null) {
+                val result = imports.sync(id, tree, servedFiles(kinds, scan.files, entries))
+                index.setImportError(id, result.error)
+                if (result.copied > 0)
+                    Log.i(LOG_TAG, "Imported ${result.copied} files of ${scan.displayName}")
+            }
+            changed
         } catch (e: Exception) {
             Log.w(LOG_TAG, "Cannot scan ${row.displayName}: ${e.message}")
             index.setScanError(id, e.message ?: e.javaClass.simpleName, now)
             row.scanError == null
         }
     }
+
+    /** What the folder's providers serve, so what an import copies: every file when a kind
+     * reads the whole tree (SFZ samples, JSFX imports), else only the entries. */
+    private fun servedFiles(kinds: List<SoundpackKind>, files: List<FolderIndex.FileRow>, entries: List<FolderIndex.EntryRow>) =
+        if (kinds.any { it.readScope == SoundpackKind.ReadScope.WHOLE_TREE }) files
+        else entries.mapTo(HashSet()) { it.path }.let { paths -> files.filter { it.path in paths } }
 
     private fun notifyChanged() =
         served.forEach { (_, authority) -> context.contentResolver.notifyChange(packsUri(authority), null) }
@@ -237,15 +287,18 @@ class FolderRegistry private constructor(context: Context) {
         Uri.Builder().scheme("content").authority(authority).appendPath(SoundpackContract.PATH_PACKS).build()
 
     private fun FolderIndex.FolderRow.toFolder() = Folder(id, Uri.parse(treeUri), displayName,
-        kinds.mapNotNull { SoundpackKind.builtIn(it) }.toSet(), revision, scannedAt, scanError, fileCount, totalBytes)
+        kinds.mapNotNull { SoundpackKind.builtIn(it) }.toSet(), revision, scannedAt, scanError, fileCount, totalBytes,
+        imported, importError)
 
     companion object {
         const val EXTRA_KINDS = "org.androidaudioplugin.soundpack.host.extra.KINDS"
         const val EXTRA_INITIAL_URI = "org.androidaudioplugin.soundpack.host.extra.INITIAL_URI"
+        /** Boolean: import (copy) the folder rather than use it in place. */
+        const val EXTRA_IMPORT = "org.androidaudioplugin.soundpack.host.extra.IMPORT"
         /** In the picker's result: the registered folder's id. */
         const val EXTRA_FOLDER_ID = "org.androidaudioplugin.soundpack.host.extra.FOLDER_ID"
         /** In the picker's result: a Bundle of kind id -> entry count, so the caller can warn
-         * when the folder has none for its kind ("No .sfz files found", D2). */
+         * when the folder has none for its kind ("No .sfz files found"). */
         const val EXTRA_ENTRY_COUNTS = "org.androidaudioplugin.soundpack.host.extra.ENTRY_COUNTS"
         const val EXTRA_ERROR = "org.androidaudioplugin.soundpack.host.extra.ERROR"
 

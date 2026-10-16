@@ -112,12 +112,17 @@ private provider for each kind you use; it must not be exported:
     android:exported="false" />
 ```
 
-`SoundpackClient` then finds these folders next to installed packs. To add folders, use one
-of:
+`SoundpackClient` then finds these folders next to installed packs. The user chooses the kind
+first and then picks a folder for it; nothing is guessed from the folder's content. Each folder
+is either imported, copied into the app's storage so that it loads like an installed pack and
+works without the folder, or used in place through SAF, which takes no storage but loads
+slower. To add folders, use one of:
 
-- `FolderRegistry.pickFolderIntent()`, which picks and links in one step without Compose;
-- `SoundpackFoldersActivity`, the Compose folder screen;
-- `FolderRegistry` directly, from your own UI.
+- `FolderRegistry.pickFolderIntent(kinds, import)`, which picks and links in one step without
+  Compose;
+- `SoundpackFoldersActivity`, the Compose folder screen, one kind at a time;
+- `FolderRegistry` directly from your own UI: `add(tree, kinds, import)`, `setImported`,
+  `removeKind`, `remove`, `rescan`.
 
 The first two start activities; see "Where setup happens".
 
@@ -135,8 +140,9 @@ Call `soundpack_init()` once, from a thread that has a `JNIEnv` (JUCE apps pass
 from an audio thread. `soundpack_list_entries("sf2")` lists entries from every source, with the
 metadata the index holds (SF2 presets, for example), so listing opens no files.
 `soundpack_open()` takes a saved identity, and `soundpack_session_map()` maps one of its files
-read-only. For linked folders, `soundpack_host.h` links a tree URI that the app already holds
-a grant for, so the app keeps its own folder picker. `samples/native-client` uses all of it.
+read-only. For linked folders, `soundpack_host.h` links (`soundpack_host_add_folder`) or imports
+(`soundpack_host_import_folder`) a tree URI that the app already holds a grant for, so the app
+keeps its own folder picker. `samples/native-client` uses all of it.
 
 ## Publishing a pack
 
